@@ -85,7 +85,7 @@ struct sighand_struct;
 struct signal_struct;
 struct task_delay_info;
 struct task_group;
-struct task_struct;
+struct task_struct; //여기도
 struct user_event_mm;
 
 #include <linux/sched/ext.h>
@@ -638,7 +638,7 @@ struct sched_rt_entity {
 } __randomize_layout;
 
 struct rq_flags;
-typedef struct task_struct *(*dl_server_pick_f)(struct sched_dl_entity *, struct rq_flags *rf);
+typedef struct task_struct *(*dl_server_pick_f)(struct sched_dl_entity *, struct rq_flags *rf); //여기
 
 struct sched_dl_entity {
 	struct rb_node			rb_node;
@@ -816,7 +816,7 @@ struct kmap_ctrl {
 #endif
 };
 
-struct task_struct {
+struct task_struct { //여기
 #ifdef CONFIG_THREAD_INFO_IN_TASK
 	/*
 	 * For reasons of header soup (see current_thread_info()), this

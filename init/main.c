@@ -907,12 +907,12 @@ static void __init early_numa_node_init(void)
 }
 
 asmlinkage __visible __init __no_sanitize_address __noreturn __no_stack_protector
-void start_kernel(void)
+void start_kernel(void) //시작
 {
 	char *command_line;
 	char *after_dashes;
 
-	set_task_stack_end_magic(&init_task);
+	set_task_stack_end_magic(&init_task); //init/init_task.c kernel/fork.c
 	smp_setup_processor_id();
 	debug_objects_early_init();
 	init_vmlinux_build_id();
