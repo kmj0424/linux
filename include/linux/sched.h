@@ -816,13 +816,13 @@ struct kmap_ctrl {
 #endif
 };
 
-struct task_struct { //여기
-#ifdef CONFIG_THREAD_INFO_IN_TASK
+struct task_struct { //task_struct 여기 작업용 플래그 관련 구조체? PID, 스케줄링, 메모리 매핑 등 고수준 정보?
+#ifdef CONFIG_THREAD_INFO_IN_TASK // 옵션이름, 커널 설정에서 쓰이는 bool 플래그 이름, thread_info를 스택 안에 두지 않고 task_struct로 넣는다, 
 	/*
 	 * For reasons of header soup (see current_thread_info()), this
 	 * must be the first element of task_struct.
 	 */
-	struct thread_info		thread_info;
+	struct thread_info		thread_info; //CPU 실행 관련 최소 정보?
 #endif
 	unsigned int			__state;
 
