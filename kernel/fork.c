@@ -856,10 +856,10 @@ int __weak arch_dup_task_struct(struct task_struct *dst,
 
 void set_task_stack_end_magic(struct task_struct *tsk) // include/linux/sched.h
 {
-	unsigned long *stackend;
+	unsigned long *stackend; // 커널이 할당한 스택의 끝을 가리키려는 변수
 
-	stackend = end_of_stack(tsk);
-	*stackend = STACK_END_MAGIC;	/* for overflow detection */
+	stackend = end_of_stack(tsk); // 스택 경계 주소 계산
+	*stackend = STACK_END_MAGIC;	/* for overflow detection */ //include/uapi/linux/magic.h 에 정의되어는 매크로, 커널이 할당한 슽택의 끝을 표시하는 값
 }
 
 static struct task_struct *dup_task_struct(struct task_struct *orig, int node)

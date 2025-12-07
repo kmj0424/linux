@@ -912,7 +912,7 @@ void start_kernel(void) //시작
 	char *command_line;
 	char *after_dashes;
 
-	set_task_stack_end_magic(&init_task); //init/init_task.c kernel/fork.c
+	set_task_stack_end_magic(&init_task); //init/init_task.c kernel/fork.c 디버깅이나 크래시상황에 오버플로우 확인하기 위함
 	smp_setup_processor_id();
 	debug_objects_early_init();
 	init_vmlinux_build_id();
