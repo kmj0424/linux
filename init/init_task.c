@@ -93,7 +93,7 @@ static struct cred init_cred = {
  * Set up the first task table, touch at your own risk!. Base=0,
  * limit=0x1fffff (=2MB)
  */
-struct task_struct init_task __aligned(L1_CACHE_BYTES) = { //
+struct task_struct init_task __aligned(L1_CACHE_BYTES) = { //init_task
 #ifdef CONFIG_THREAD_INFO_IN_TASK
 	.thread_info	= INIT_THREAD_INFO(init_task),
 	.stack_refcount	= REFCOUNT_INIT(1),

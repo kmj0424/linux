@@ -64,7 +64,7 @@ static inline unsigned long *end_of_stack(const struct task_struct *p) // end_of
 
 #endif
 
-#ifdef CONFIG_THREAD_INFO_IN_TASK
+#ifdef CONFIG_THREAD_INFO_IN_TASK //CONFIG_THREAD_INFO_IN_TASK
 static inline void *try_get_task_stack(struct task_struct *tsk)
 {
 	return refcount_inc_not_zero(&tsk->stack_refcount) ?

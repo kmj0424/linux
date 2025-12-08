@@ -182,12 +182,14 @@ config IRQ_WORK
 config BUILDTIME_TABLE_SORT
 	bool
 
-config THREAD_INFO_IN_TASK
+config THREAD_INFO_IN_TASK #THREAD_INFO_IN_TASK
 	bool
 	help
-	  Select this to move thread_info off the stack into task_struct.  To
-	  make this work, an arch will need to remove all thread_info fields
+	  Select this to move thread_info off the stack into task_struct.
+	  #이 옵션을 선택하면 thread_info를 스택에서 빼서 task_struct 안으로 옮깁니다. (thread_info) 꺼지면 커널 스택 맨 아래(레거시방식), 켜지면 struct task_struct 안의 멤버로(모던방식)
+	  To make this work, an arch will need to remove all thread_info fields
 	  except flags and fix any runtime bugs.
+	  #이 방식이 동작하게 만들려면, 각 아키텍처(arch)는 thread_info에서 flags를 제외한 모든 필드를 제거하고, 런타임 버그를 수정해야 합니다.
 
 	  One subtle change that will be needed is to use try_get_task_stack()
 	  and put_task_stack() in save_thread_stack_tsk() and get_wchan().

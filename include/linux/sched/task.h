@@ -12,7 +12,7 @@
 #include <linux/sched.h>
 #include <linux/uaccess.h>
 
-struct task_struct; //여기도
+struct task_struct; //
 struct rusage;
 union thread_union;
 struct css_set;

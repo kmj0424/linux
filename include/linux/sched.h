@@ -819,6 +819,7 @@ struct kmap_ctrl {
 struct task_struct { //task_struct 여기 작업용 플래그 관련 구조체? PID, 스케줄링, 메모리 매핑 등 고수준 정보?
 #ifdef CONFIG_THREAD_INFO_IN_TASK // 옵션이름, 커널 설정에서 쓰이는 bool 플래그 이름, thread_info를 스택 안에 두지 않고 task_struct로 넣는다, 
 	/*
+	thread_info를 스택에서 빼버리고 task_struct 안에 넣으면, 스택 자체는 별도의 메모리 블록(예: vmap stack) 으로 관리됨.
 	 * For reasons of header soup (see current_thread_info()), this
 	 * must be the first element of task_struct.
 	 */
@@ -1564,7 +1565,7 @@ struct task_struct { //task_struct 여기 작업용 플래그 관련 구조체? 
 #ifdef CONFIG_VMAP_STACK
 	struct vm_struct		*stack_vm_area;
 #endif
-#ifdef CONFIG_THREAD_INFO_IN_TASK
+#ifdef CONFIG_THREAD_INFO_IN_TASK //
 	/* A live task holds one reference: */
 	refcount_t			stack_refcount;
 #endif
