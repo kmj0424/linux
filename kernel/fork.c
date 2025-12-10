@@ -854,9 +854,9 @@ int __weak arch_dup_task_struct(struct task_struct *dst,
 	return 0;
 }
 
-void set_task_stack_end_magic(struct task_struct *tsk) // include/linux/sched.h
+void set_task_stack_end_magic(struct task_struct *tsk) // include/linux/sched.h init_task 생성하면서 만든 스택을 받아옴 / 커널 스택 오버플로우 검사를 위해서
 {
-	unsigned long *stackend; // 커널이 할당한 스택의 끝을 가리키려는 변수
+	unsigned long *stackend; // init_task를 만들면서 커널이 할당한 스택의 끝을 가리키려는 변수 / 주소 저장을 위한 포인터 / 비트가 음수가 나오면 안돼서 unsigned이고 주소여서 long / 8비트짜리 값을 지녀야해서 / 경계지점에 값을 써야하기 떄문에/
 
 	stackend = end_of_stack(tsk); // 스택 경계 주소 계산
 	*stackend = STACK_END_MAGIC;	/* for overflow detection */ //include/uapi/linux/magic.h 에 정의되어는 매크로, 커널이 할당한 슽택의 끝을 표시하는 값

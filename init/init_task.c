@@ -93,7 +93,7 @@ static struct cred init_cred = {
  * Set up the first task table, touch at your own risk!. Base=0,
  * limit=0x1fffff (=2MB)
  */
-struct task_struct init_task __aligned(L1_CACHE_BYTES) = { //init_task
+struct task_struct init_task __aligned(L1_CACHE_BYTES) = { //init_task 부팅 직후 가장 먼저 생기는 task(최초의 커널 스레드)/ 커널 이미지 안에 미리 할당된 배열로 존재해서 시작하자마자 인자로 넣기 가능/ 정적 배열
 #ifdef CONFIG_THREAD_INFO_IN_TASK
 	.thread_info	= INIT_THREAD_INFO(init_task),
 	.stack_refcount	= REFCOUNT_INIT(1),

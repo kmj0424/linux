@@ -45,7 +45,7 @@ typedef struct xtregs_coprocessor {
 
 #endif
 
-struct thread_info { // thread_info CPU 실행 관련 최소 정보?
+struct thread_info { // thread_info CPU가 지금 실행 중인 스레드에서 필요한 정보만 최소한으로 담은 구조체
 	struct task_struct	*task;		/* main task structure */ //프로세스/스레드 전체 정보(PID, 스케줄링, 메모리, signal 등)
 	unsigned long		flags;		/* low level flags */
 	unsigned long		status;		/* thread-synchronous flags */
