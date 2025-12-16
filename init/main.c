@@ -909,6 +909,15 @@ static void __init early_numa_node_init(void)
 asmlinkage __visible __init __no_sanitize_address __noreturn __no_stack_protector
 void start_kernel(void) //시작
 {
+	/*
+	아키텍처별로 asm 초기화를 치고 들어옴
+	linux asm?
+	최소한의 메모리 매핑/스택이 준비됨
+	전역 데이터가 초기화 가능한 상태
+	커널 부팅의 메인 파이프라인이 시작됨
+	ARM은 저전력, 고효율을 특징으로 하는 RISC 기반 CPU 설계 모델
+	risc ? 
+	*/
 	char *command_line;
 	char *after_dashes;
 
