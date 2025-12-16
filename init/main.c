@@ -908,7 +908,6 @@ static void __init early_numa_node_init(void)
 
 asmlinkage __visible __init __no_sanitize_address __noreturn __no_stack_protector
 void start_kernel(void) //시작
-{
 	/*
 	아키텍처별로 asm 초기화를 치고 들어옴
 	linux asm?
@@ -918,14 +917,26 @@ void start_kernel(void) //시작
 	ARM은 저전력, 고효율을 특징으로 하는 RISC 기반 CPU 설계 모델
 	risc ? 
 	*/
+{
 	char *command_line;
 	char *after_dashes;
 
-	set_task_stack_end_magic(&init_task); //init/init_task.c kernel/fork.c 디버깅이나 크래시상황에 오버플로우 확인하기 위함
+	set_task_stack_end_magic(&init_task); //init/init_task.c kernel/fork.c
+	/*
+	디버깅이나 크래시상황에 오버플로우 확인하기 위함 
+	*/
 	smp_setup_processor_id();
+	/*
+	지금 코드를 실행중인 CPU processor id 확정
+	*/
 	debug_objects_early_init();
+	/*
+	커널의 디버그 오브젝트 추적 서브 시스템을 초기에 켜는 작업
+	*/
 	init_vmlinux_build_id();
-
+	/*
+	현재 부팅 중인 커널 이미지
+	*/
 	cgroup_init_early();
 
 	local_irq_disable();
