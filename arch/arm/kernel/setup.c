@@ -593,10 +593,14 @@ void notrace cpu_init(void)
 
 u32 __cpu_logical_map[NR_CPUS] = { [0 ... NR_CPUS-1] = MPIDR_INVALID };
 
-void __init smp_setup_processor_id(void)
+void __init smp_setup_processor_id(void) // smp_setup_processor_id
 {
 	int i;
 	u32 mpidr = is_smp() ? read_cpuid_mpidr() & MPIDR_HWID_BITMASK : 0;
+	/*
+	mpidr 멀티 프로세서 id 레지스터 (Multiprocessor Affinity Register) cpu id 저장돼있는 레지스터?
+	
+	*/
 	u32 cpu = MPIDR_AFFINITY_LEVEL(mpidr, 0);
 
 	cpu_logical_map(0) = cpu;

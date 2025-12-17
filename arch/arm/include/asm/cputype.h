@@ -257,8 +257,11 @@ static inline unsigned int __attribute_const__ read_cpuid_tcmstatus(void)
 	return read_cpuid(CPUID_TCM);
 }
 
-static inline unsigned int __attribute_const__ read_cpuid_mpidr(void)
+static inline unsigned int __attribute_const__ read_cpuid_mpidr(void) //cpu mpidr 읽어옴
 {
+	/*
+	__attribute_const__ : 이 함수는 입력 인자만으로 결과가 결정되고, 외부 메모리 상태에 의존하지 않는다는 힌트를 컴파일러에 주는 GCC 속성이다
+	*/
 	return read_cpuid(CPUID_MPIDR);
 }
 

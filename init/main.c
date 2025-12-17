@@ -915,7 +915,8 @@ void start_kernel(void) //시작
 	전역 데이터가 초기화 가능한 상태
 	커널 부팅의 메인 파이프라인이 시작됨
 	ARM은 저전력, 고효율을 특징으로 하는 RISC 기반 CPU 설계 모델
-	risc ? 
+	risc ?
+	inline : 함수 호출 오버헤드 제거 / 부트 초반 커널 코드에서 필수
 	*/
 {
 	char *command_line;
@@ -928,6 +929,27 @@ void start_kernel(void) //시작
 	smp_setup_processor_id();
 	/*
 	지금 코드를 실행중인 CPU processor id 확정
+	cpu processor id -> cpu siblings -> 소켓
+	cat /proc/cpuinfo
+	물리 코어 : cpu
+	하이퍼스레딩 : 하나의 물리 코어를 두 개의 논리 실행 단위처럼 보이게 만드는 기술
+	-> 코어가 놀고 있는 시간(파이프라인 버블)을 다른 스레드로 채우자
+	?계산 유닛(ALU, FPU)은 공유
+	?레지스터 상태, 프로그램 카운터 같은 아키텍처 상태는 분리
+	파이프라인 or 파이프라이닝 : 프로세서로 가는 명령어들의 움직임, 연산 병렬
+	IF (Instruction Fetch) : 명령어를 메모리부터 가져온다.
+	ID (Instruction Decode) : 명령어를 해독하고 동시에 레지스터를 읽는다.
+	EX (Execute) : ALU를 통해서 해당 연산을 수행하거나 주소를 계산한다.
+	MEM (Data Memory access) : 데이터 메모리에 있는 피연산자를 접근한다.
+	WB (Write Back) : 결과값을 레지스터에 쓴다.
+	?파이프라인 종류
+	?해저드
+	?파이프라인 버블
+	논리 코어 : OS가 인식하는 CPU 단위 스케줄러가 태스크를 올린다고 생각하는 대상
+	siblings : 같은 물리 CPU 패키지(소켓) 안에 있는 논리 CPU 개수
+	core id : 어떤 논리 CPU들이 같은 물리 코어를 공유하는지
+	physical id(Cpu 소켓) : 메인보드에 꽂힌 CPU 패키지 번호
+	?패킷
 	*/
 	debug_objects_early_init();
 	/*
