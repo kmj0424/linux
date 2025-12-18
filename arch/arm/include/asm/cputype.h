@@ -165,6 +165,7 @@ static inline unsigned int __attribute_const__ read_cpuid_ext(unsigned offset)
  * read_cpuid and read_cpuid_ext should only ever be called on machines that
  * have cp15 so warn on other usages.
  */
+// ({ ... }) 는 GCC 확장(statement expression)
 #define read_cpuid(reg)							\
 	({								\
 		WARN_ON_ONCE(1);					\
@@ -257,10 +258,14 @@ static inline unsigned int __attribute_const__ read_cpuid_tcmstatus(void)
 	return read_cpuid(CPUID_TCM);
 }
 
-static inline unsigned int __attribute_const__ read_cpuid_mpidr(void) //cpu mpidr 읽어옴
+static inline unsigned int __attribute_const__ read_cpuid_mpidr(void) //cpu mpidr 읽어옴, ISA 레벨 레지스터
 {
 	/*
 	__attribute_const__ : 이 함수는 입력 인자만으로 결과가 결정되고, 외부 메모리 상태에 의존하지 않는다는 힌트를 컴파일러에 주는 GCC 속성이다
+	MPIDR은 비트 필드로 해석하는 ID 레지스터이고, 커널은 이 값을 정수 비트 덩어리로 다루기 때문에 unsigned int
+	다 size_t로 안쓰는건 의미 문제?? 왜?? 그냥 약속??
+	내우 비트 필드 구조는 산술 연산 x, 부호 개념 x, 비트 마스킹 & 시프트로 해석 -> 숫자가 아니라 ID 비트 묶음
+	ID 비트 묶음 : 
 	*/
 	return read_cpuid(CPUID_MPIDR);
 }
