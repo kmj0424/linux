@@ -601,7 +601,7 @@ void __init smp_setup_processor_id(void) // smp_setup_processor_id
 	mpidr 멀티 프로세서 id 레지스터 (Multiprocessor Affinity Register) cpu id 저장돼있는 레지스터?
 	is_smp() : SMP(멀티코어) 환경이면 true.
 	*/
-	u32 cpu = MPIDR_AFFINITY_LEVEL(mpidr, 0);
+	u32 cpu = MPIDR_AFFINITY_LEVEL(mpidr, 0); // 그 값에서 level 0(core ID)를 가져와서 cpu에 저장
 
 	cpu_logical_map(0) = cpu; // 논리 CPU 번호와 물리 CPU ID 매핑
 	for (i = 1; i < nr_cpu_ids; ++i)

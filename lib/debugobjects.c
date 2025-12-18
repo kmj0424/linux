@@ -1409,7 +1409,7 @@ static inline bool debug_objects_selftest(void) { return true; }
  * the static object pool objects into the poll list. After this call
  * the object tracker is fully operational.
  */
-void __init debug_objects_early_init(void)
+void __init debug_objects_early_init(void) // debug_objects_early_init
 {
 	int i;
 
