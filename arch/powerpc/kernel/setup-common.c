@@ -904,7 +904,7 @@ static void __init smp_setup_pacas(void)
  * Called into from start_kernel this initializes memblock, which is used
  * to manage page allocation until mem_init is called.
  */
-void __init setup_arch(char **cmdline_p)
+void __init setup_arch(char **cmdline_p) //setup_arch 여기
 {
 	kasan_init();
 

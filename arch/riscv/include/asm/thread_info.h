@@ -88,6 +88,7 @@ struct thread_info {
  *
  * preempt_count needs to be 1 initially, until the scheduler is functional.
  */
+//INIT_TRHEAD_INFO
 #define INIT_THREAD_INFO(tsk)			\
 {						\
 	.flags		= 0,			\

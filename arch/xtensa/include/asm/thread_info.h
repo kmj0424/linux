@@ -45,16 +45,16 @@ typedef struct xtregs_coprocessor {
 
 #endif
 
-struct thread_info {
-	struct task_struct	*task;		/* main task structure */
+struct thread_info { // thread_info CPU가 지금 실행 중인 스레드에서 필요한 정보만 최소한으로 담은 구조체
+	struct task_struct	*task;		/* main task structure */ //프로세스/스레드 전체 정보(PID, 스케줄링, 메모리, signal 등)
 	unsigned long		flags;		/* low level flags */
 	unsigned long		status;		/* thread-synchronous flags */
 	__u32			cpu;		/* current CPU */
 	__s32			preempt_count;	/* 0 => preemptable,< 0 => BUG*/
 
-#if XCHAL_HAVE_EXCLUSIVE
-	/* result of the most recent exclusive store */
-	unsigned long		atomctl8;
+#if XCHAL_HAVE_EXCLUSIVE // Xtensa CPU가 exclusive load/store (LL/SC) 연산을 지원하는지 여부를 나타내는 매크로
+	/* result of the most recent exclusive store */ //가장 최근에 수행된 exclusive store 명령의 결과를 저장하는 값
+	unsigned long		atomctl8; //exclusive store 성공 여부
 #endif
 #ifdef CONFIG_USER_ABI_CALL0_PROBE
 	/* Address where PS.WOE was enabled by the ABI probing code */
