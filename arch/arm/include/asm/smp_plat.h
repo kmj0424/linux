@@ -15,15 +15,20 @@
 /*
  * Return true if we are running on a SMP platform
  */
-static inline bool is_smp(void)
+static inline bool is_smp(void) // 현재 커널이 SMP(멀티프로세서) 동작을 해야 하는가 - 커널 옵션과 부팅 옵션까지 고려
 {
 #ifndef CONFIG_SMP
 	return false;
-#elif defined(CONFIG_SMP_ON_UP)
-	extern unsigned int smp_on_up;
-	return !!smp_on_up;
-#else
-	return true;
+/*
+커널을 아예 SMP 미지원으로 빌드
+커널은 무조건 단일 CPU 전용
+락,IPI,per-cpu SMP 로직 전부 제거
+*/
+#elif defined(CONFIG_SMP_ON_UP) //UP(단일 CPU) 머신에서 SMP 커널을 실행할 수 있게 함(디버깅, 커널 공용 바이너리 배포, 테스트 목적)
+	extern unsigned int smp_on_up; // 런타임 변수 (부팅 옵션, CPU 개수 감지 결과에 따라 설정)
+	return !!smp_on_up; // !! -> 0이면 false, 0이 아니면 true
+#else // 커널이 SMP 지원으로 빌드, UP에서 SMP 비활성화 옵션도 없음
+	return true; // 락, IPI, CPU 간 동기화 전부 활성화
 #endif
 }
 

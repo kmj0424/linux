@@ -908,24 +908,80 @@ static void __init early_numa_node_init(void)
 
 asmlinkage __visible __init __no_sanitize_address __noreturn __no_stack_protector
 void start_kernel(void) //시작
-{
 	/*
 	아키텍처별로 asm 초기화를 치고 들어옴
-	linux asm?
+	linux asm? 공격 표면 관리??
 	최소한의 메모리 매핑/스택이 준비됨
 	전역 데이터가 초기화 가능한 상태
 	커널 부팅의 메인 파이프라인이 시작됨
 	ARM은 저전력, 고효율을 특징으로 하는 RISC 기반 CPU 설계 모델
-	risc ? 
+	ISA(Instruction Set Architecture) : CPU가 인식, 해석, 실행할 수 있는 명령어 집합
+	ISA가 같은 CPU끼리는 서로의 명령어를 이해할 수 있지만 ISA가 다르면 서로의 명령어를 이해하지 못한다???
+	RISC : Load-Store 구조, 1클럭 내외로 실행되는 단순하고 적은 수의 고정 길이 명령어 집합
+	CISC : 복잡하고 다양한 명령어 집합, 다양한 주소 지정 방식과 특별한 명령어, 파이프라이닝의 어려움? 실행 시간 불규칙성 ????
+	inline : 함수 호출 오버헤드 제거 / 부트 초반 커널 코드에서 필수
 	*/
+{
 	char *command_line;
 	char *after_dashes;
 
-	set_task_stack_end_magic(&init_task); //init/init_task.c kernel/fork.c 디버깅이나 크래시상황에 오버플로우 확인하기 위함
+	set_task_stack_end_magic(&init_task); //init/init_task.c kernel/fork.c
+	/*
+	디버깅이나 크래시상황에 오버플로우 확인하기 위함 
+	*/
 	smp_setup_processor_id();
+	/*
+	지금 코드를 실행중인 CPU processor id 확정
+	cpu processor id -> cpu siblings -> 소켓
+	??SMP : 대칭형 다중 처리
+	->모든 CPU 동등(커널 코드 실행 가능, 인터럽트 처리 가능, 스케줄링 대상)
+	cat /proc/cpuinfo
+	?? ALU는 필수 FPU는 선택??
+	물리 코어 : cpu
+	하이퍼스레딩 : 하나의 물리 코어를 두 개의 논리 실행 단위처럼 보이게 만드는 기술
+	-> 코어가 놀고 있는 시간(파이프라인 버블)을 다른 스레드로 채우자
+	-> 연산 능력을 늘리는 기술보다 파이프라인 버블을 숨기는 기술
+	계산 유닛(ALU, FPU)은 공유
+	ALU : 산술 논리 장치(정수 연산, 논리연산)
+	FPU : 부동 소수점 장치(실수 포함 부동소수점 연산)
+	?레지스터 상태, 프로그램 카운터 같은 아키텍처 상태는 분리
+	?MIPS란  밉스 테크놀리지에서 개발한 RISC 기반의 마이크로 프로세서 명령어 집합 구조
+	?mips : 컴퓨터 아키텍처의 한 종류인 연동 파이프라인 스테이지가 없는 마이크로프로세서
+	-Microprocessor without Interlocked Pipeline Stages의 약자
+	-단순한 RISC 구조를 가진 프로세서 자체
+	파이프라인 or 파이프라이닝 : 프로세서로 가는 명령어들의 움직임, 연산 병렬
+	IF (Instruction Fetch) : 명령어를 메모리부터 가져온다.
+	ID (Instruction Decode) : 명령어를 해독하고 동시에 레지스터를 읽는다.
+	EX (Execute) : ALU를 통해서 해당 연산을 수행하거나 주소를 계산한다.
+	MEM (Data Memory access) : 데이터 메모리에 있는 피연산자를 접근한다.
+	WB (Write Back) : 결과값을 레지스터에 쓴다.
+	?파이프라인 종류
+	Super Scalar
+	Super Pipeline
+	Superpipelined, Superscalar
+	VLIW
+	해저드 : 파이프라인 오류
+	구조적 해저드
+	데이터 해저드
+	제어 해저드
+	?파이프라인 버블
+	논리 코어 : OS가 인식하는 CPU 단위 스케줄러가 태스크를 올린다고 생각하는 대상
+	siblings : 같은 물리 CPU 패키지(소켓) 안에 있는 논리 CPU 개수
+	core id : 어떤 논리 CPU들이 같은 물리 코어를 공유하는지
+	physical id(Cpu 소켓) : 메인보드에 꽂힌 CPU 패키지 번호
+	?패킷
+	?APIC 레지스터
+	?비트마스킹 : 정수의 이진수 표현을 자료구조로 쓰는 기법
+	?apic
+	*/
 	debug_objects_early_init();
+	/*
+	커널의 디버그 오브젝트 추적 서브 시스템을 초기에 켜는 작업
+	*/
 	init_vmlinux_build_id();
-
+	/*
+	현재 부팅 중인 커널 이미지
+	*/
 	cgroup_init_early();
 
 	local_irq_disable();
