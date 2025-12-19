@@ -1409,14 +1409,28 @@ static inline bool debug_objects_selftest(void) { return true; }
  * the static object pool objects into the poll list. After this call
  * the object tracker is fully operational.
  */
-void __init debug_objects_early_init(void) // debug_objects_early_init
+void __init debug_objects_early_init(void) // debug_objects_early_init __init 부팅중에만 사용, 런타임 x, 부팅 전용 초기화 코드
 {
+	/*
+	obj_hash : debugobjects가 관리 중인 오브젝트들을 빠르게 찾기 위한 해시 테이블, 각 버킷(bucket)마다 락이 하나씩 있음
+	ODEBUG_HASH_SIZE : 해시 테이블의 크기 (버킷 개수)
+	raw_spin_lock_init() : 아주 낮은 수준의 스핀락 초기화, 일반 spin_lock보다 더 원시적인 락
+	아직 스케줄러, preemption, IRQ 관리가 완전히 준비되지 않았음 그래서 최소한의 락만 써야 함
+	debugobjects 해시 테이블의 각 버킷에 들어 있는 락을 ‘사용 가능 상태’로 초기화한다.
+	이걸 안 하면 나중에 debugobjects가 오브젝트를 추적하다가 락을 잡는 순간 커널이 바로 터짐
+	obj_static_pool : 정적으로 미리 만들어 둔 debug object 풀, 동적 할당이 안 되는 시점을 대비한 예비 오브젝트들
+	ODEBUG_POOL_SIZE : 이 static 풀에 들어 있는 오브젝트 개수
+	obj_static_pool[i].node : 각 오브젝트가 리스트에 들어가기 위한 hlist_node
+	pool_boot : 부팅 초기에만 사용하는 임시 리스트, 지금은 다 여기 넣어두는 용도
+	hlist_add_head() : 해시 리스트(hlist)의 맨 앞에 노드 추가
+	debugobjects가 쓸 수 있는 모든 static 오브젝트를 부트 전용 리스트(pool_boot)에 전부 연결해 둔다.
+	*/
 	int i;
 
 	for (i = 0; i < ODEBUG_HASH_SIZE; i++)
 		raw_spin_lock_init(&obj_hash[i].lock);
-
-	/* Keep early boot simple and add everything to the boot list */
+	/* Keep early boot simple and add everything to the boot list
+	부팅 초반은 단순하게 유지하고, 모든 것을 부트 리스트에 넣어둔다. */
 	for (i = 0; i < ODEBUG_POOL_SIZE; i++)
 		hlist_add_head(&obj_static_pool[i].node, &pool_boot);
 }

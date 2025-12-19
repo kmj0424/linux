@@ -977,6 +977,11 @@ void start_kernel(void) //시작
 	debug_objects_early_init();
 	/*
 	커널의 디버그 오브젝트 추적 서브 시스템을 초기에 켜는 작업
+	디버그오브젝트도 smp처럼 의미가 있는 것인가?
+	커널 안에 debugobjects라는 디버깅 서브시스템(프레임워크)이 있음
+	그게 타이머/워크큐/RCU head 같은 커널 오브젝트들의 수명(lifetime) 규칙을 추적하기 위해
+	내부적으로 추적용 엔트리(=debug object record)를 만들어 관리
+	디버그 오브젝트는 실제 커널 오브젝트가 아닌 추적하긴 메타데이터 레코드
 	*/
 	init_vmlinux_build_id();
 	/*
