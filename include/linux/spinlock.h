@@ -96,7 +96,10 @@
 #else
 # include <linux/spinlock_up.h>
 #endif
-
+/*
+	raw_spinlock_t : 잠금 풀릴 때까지 CPU를 놓지 않고 spin하며 기다리는 락
+	그 동안에 잠들 수 없고 (sleep x), 문맥교환 안되고, 매우 짧은 임계구역 보호용
+*/
 #ifdef CONFIG_DEBUG_SPINLOCK
   extern void __raw_spin_lock_init(raw_spinlock_t *lock, const char *name,
 				   struct lock_class_key *key, short inner);
@@ -107,7 +110,7 @@ do {									\
 									\
 	__raw_spin_lock_init((lock), #lock, &__key, LD_WAIT_SPIN);	\
 } while (0)
-
+//raw_spin_lock_init
 #else
 # define raw_spin_lock_init(lock)				\
 	do { *(lock) = __RAW_SPIN_LOCK_UNLOCKED(lock); } while (0)

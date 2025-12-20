@@ -18,7 +18,7 @@
 #include <linux/seq_file.h>
 #include <linux/slab.h>
 #include <linux/static_key.h>
-
+//ODEBUG
 #define ODEBUG_HASH_BITS	14
 #define ODEBUG_HASH_SIZE	(1 << ODEBUG_HASH_BITS)
 
@@ -1409,7 +1409,7 @@ static inline bool debug_objects_selftest(void) { return true; }
  * the static object pool objects into the poll list. After this call
  * the object tracker is fully operational.
  */
-void __init debug_objects_early_init(void) // debug_objects_early_init __init 부팅중에만 사용, 런타임 x, 부팅 전용 초기화 코드
+void __init debug_objects_early_init(void) // debug_objects_early_init __init 부팅중에만 사용, 런타임 x, 부팅 전용 초기화 코드, 부팅 끝나면 버려짐
 {
 	/*
 	obj_hash : debugobjects가 관리 중인 오브젝트들을 빠르게 찾기 위한 해시 테이블, 각 버킷(bucket)마다 락이 하나씩 있음
@@ -1428,10 +1428,22 @@ void __init debug_objects_early_init(void) // debug_objects_early_init __init �
 	int i;
 
 	for (i = 0; i < ODEBUG_HASH_SIZE; i++)
-		raw_spin_lock_init(&obj_hash[i].lock);
+	/*
+	ODEBUG_HASH_BITS = 14, ODEBUG_HASH_SIZE (1<<O_H_B) 시프틑 연산 2^14
+	객체 추적용 해시 테이블의 각 버킷에 들어있는 스핀락을 초기화
+	객체 추적 : 객체 주소를 해시해서 버킷에 넣는 방식
+	동시에 여러 CPU가 접근할 수 있으므로 락이 필요
+	*/
+		raw_spin_lock_init(&obj_hash[i].lock); // 스핀락 내부 값을 언락 상태로 초기화, 디버그용 magic 값 세팅
+		//raw spinlock 은 스케줄러가 없는 상태에서도 쓸 수 있는 raw 스핀락
 	/* Keep early boot simple and add everything to the boot list
 	부팅 초반은 단순하게 유지하고, 모든 것을 부트 리스트에 넣어둔다. */
-	for (i = 0; i < ODEBUG_POOL_SIZE; i++)
+	// 모든 버킷이 락 사용 가능 상태
+	for (i = 0; i < ODEBUG_POOL_SIZE; i++) // 미리 만들어둔 debug objects 전부 부트용 풀 리스트에 연결
+	/*
+	추적용으로 쓰는 debug_obj(메타데이터)를 풀로 관리
+	POOL_SIZE = 512
+	*/
 		hlist_add_head(&obj_static_pool[i].node, &pool_boot);
 }
 

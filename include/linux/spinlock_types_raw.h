@@ -10,7 +10,7 @@
 #endif
 
 #include <linux/lockdep_types.h>
-
+//raw_spinlock_t
 typedef struct raw_spinlock {
 	arch_spinlock_t raw_lock;
 #ifdef CONFIG_DEBUG_SPINLOCK

@@ -204,9 +204,13 @@ struct list_head {
 struct hlist_head {
 	struct hlist_node *first;
 };
-
+// hlist_node
 struct hlist_node {
 	struct hlist_node *next, **pprev;
+	/*
+	next 는 *형이고 pprev는 **인 이유
+	
+	*/
 };
 
 struct ustat {
