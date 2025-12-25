@@ -6707,9 +6707,9 @@ static inline int not_in_range(const void* mem_from, unsigned long mem_len,
  * is destroyed or reinitialized - this code checks whether there is
  * any held lock in the memory range of <from> to <to>:
  */
-void debug_check_no_locks_freed(const void *mem_from, unsigned long mem_len)
+void debug_check_no_locks_freed(const void *mem_from, unsigned long mem_len) //debug_check_no_locks_freed
 {
-	struct task_struct *curr = current;
+	struct task_struct *curr = current; // 현재 실행 중인 태스크의 task_struct
 	struct held_lock *hlock;
 	unsigned long flags;
 	int i;

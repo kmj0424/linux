@@ -100,6 +100,7 @@
 	raw_spinlock_t : 잠금 풀릴 때까지 CPU를 놓지 않고 spin하며 기다리는 락
 	그 동안에 잠들 수 없고 (sleep x), 문맥교환 안되고, 매우 짧은 임계구역 보호용
 */
+//raw_spin_lock_init
 #ifdef CONFIG_DEBUG_SPINLOCK
   extern void __raw_spin_lock_init(raw_spinlock_t *lock, const char *name,
 				   struct lock_class_key *key, short inner);
@@ -110,11 +111,26 @@ do {									\
 									\
 	__raw_spin_lock_init((lock), #lock, &__key, LD_WAIT_SPIN);	\
 } while (0)
-//raw_spin_lock_init
+/*
+static struct lock_class_key __key;
+lockdep(락 의존성 추적기)가 이 락은 어떤 종류의 락인가?를 구분할 때 쓰는 고유 키.
+static인 이유: 매 호출마다 새 키를 만들면 lockdep 입장에서 매번 다른 락처럼 보일 수 있음.
+같은 락 초기화 지점은 같은 키를 공유해 같은 락 클래스로 묶으려는 목적.
+#lock
+매크로 문자열화(stringify). 예: raw_spin_lock_init(&foo.lock)이면 name에 lock 같은 형태가 들어감(실제 표현은 호출 형태에 따라 다름).
+lockdep에서 사람이 보기 좋은 이름(디버그 출력)에 사용.
+LD_WAIT_SPIN
+lockdep 쪽에서 이 락은 기다릴 때 spin(바쁜 대기) 방식이다 같은 대기(wait) 타입 힌트로 쓰이는 값.
+*/
 #else
 # define raw_spin_lock_init(lock)				\
 	do { *(lock) = __RAW_SPIN_LOCK_UNLOCKED(lock); } while (0)
 #endif
+/*
+디버그용 필드(매직/소유자/lockdep맵) 같은 건 건드리지 않고
+그냥 raw_spinlock_t 전체를 unlocked 초기값으로 세팅.
+성능/코드 크기/부팅 단순성을 우선하는 경로.
+*/
 
 #define raw_spin_is_locked(lock)	arch_spin_is_locked(&(lock)->raw_lock)
 

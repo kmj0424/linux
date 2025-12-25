@@ -43,7 +43,7 @@
 #define ODEBUG_FREE_WORK_MAX	(1024 / ODEBUG_BATCH_SIZE)
 #define ODEBUG_FREE_WORK_DELAY	DIV_ROUND_UP(HZ, 10)
 
-struct debug_bucket {
+struct debug_bucket { // debug_bucket
 	struct hlist_head	list;
 	raw_spinlock_t		lock;
 };
@@ -1440,8 +1440,7 @@ void __init debug_objects_early_init(void) // debug_objects_early_init __init �
 	/*
 	i번째 해시 버킷에 대해 이 버킷을 동시에 여러 CPU가 건드려도 깨지지 않도록
 	사용할 스핀락을 아직 아무도 잡고 있지 않은 상태로 초기화한다.
-	*/
-	/* Keep early boot simple and add everything to the boot list
+	Keep early boot simple and add everything to the boot list
 	부팅 초반은 단순하게 유지하고, 모든 것을 부트 리스트에 넣어둔다. */
 	// 모든 버킷이 락 사용 가능 상태
 	/*
@@ -1457,7 +1456,7 @@ void __init debug_objects_early_init(void) // debug_objects_early_init __init �
 		hlist_add_head(&obj_static_pool[i].node, &pool_boot);
 	/*
 	부팅 초반에는 동적 메모리 할당이 아직 안정적이지 않아서 미리 정적으로 준비해둔 객체 추적용 슬롯( obj_static_pool[] )을 쓴다.
-	그리고 그 슬롯들을 나중에 하나씩 꺼내 쓸 수 있도록 ODEBUG_POOL_SIZE 개 전부를 부트용 free 리스트( pool_boot )에 연결해 둔다.
+	그리고 그 슬롯들을 나중에 하나씩 꺼내 쓸 수 있도록 ODEBUG_POOL_SIZE 전부를 부트용 free 리스트( pool_boot )에 연결해 둔다.
 	*/
 }
 

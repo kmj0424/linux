@@ -203,8 +203,9 @@ struct pin_cookie { unsigned int val; };
 #define MAX_LOCKDEP_KEYS		(1UL << MAX_LOCKDEP_KEYS_BITS)
 #define INITIAL_CHAIN_KEY		-1
 
-struct held_lock {
+struct held_lock { //held_lock
 	/*
+	lockdep가 각 태스크별로 현재 잡고 있는 락 하나를 표현하기 위해 사용하는 기록 구조체
 	 * One-way hash of the dependency chain up to this point. We
 	 * hash the hashes step by step as the dependency chain grows.
 	 *
@@ -220,7 +221,7 @@ struct held_lock {
 	 */
 	u64				prev_chain_key;
 	unsigned long			acquire_ip;
-	struct lockdep_map		*instance;
+	struct lockdep_map		*instance; // 지금 잡고 있는 실제 락 객체
 	struct lockdep_map		*nest_lock;
 #ifdef CONFIG_LOCK_STAT
 	u64 				waittime_stamp;

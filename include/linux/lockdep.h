@@ -132,6 +132,7 @@ static inline void
 lockdep_init_map_waits(struct lockdep_map *lock, const char *name,
 		       struct lock_class_key *key, int subclass, u8 inner, u8 outer)
 {
+	// LD_LOCK_NORMAL : 이 락은 특별한 규칙이 없는 일반적인(lockdep 기본 규칙을 따르는) 락
 	lockdep_init_map_type(lock, name, key, subclass, inner, outer, LD_LOCK_NORMAL);
 }
 
@@ -139,6 +140,7 @@ static inline void
 lockdep_init_map_wait(struct lockdep_map *lock, const char *name,
 		      struct lock_class_key *key, int subclass, u8 inner)
 {
+	// LD_WAIT_INV : waits 계열에서 기본/무효/검증용으로 넣는 값(INV = invalid)
 	lockdep_init_map_waits(lock, name, key, subclass, inner, LD_WAIT_INV);
 }
 

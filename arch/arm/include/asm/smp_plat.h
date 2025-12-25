@@ -15,6 +15,12 @@
 /*
  * Return true if we are running on a SMP platform
  */
+
+/*
+커널이 SMP 미지원 -> false
+UP 커널인데 SMP 흉내 -> 설정에 따라
+진짜 SMP 커널 -> true
+*/
 static inline bool is_smp(void) // 현재 커널이 SMP(멀티프로세서) 동작을 해야 하는가 - 커널 옵션과 부팅 옵션까지 고려
 {
 #ifndef CONFIG_SMP

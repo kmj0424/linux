@@ -171,7 +171,7 @@ static inline unsigned int __attribute_const__ read_cpuid_ext(unsigned offset)
 		WARN_ON_ONCE(1);					\
 		0;							\
 	})
-
+//warn_on_once가 참이면 warning 출력 -> 항상 참이라 항상 출력, 런타임에만 경고, 값은 0 반환
 #define read_cpuid_ext(reg) read_cpuid(reg)
 
 #endif /* ifdef CONFIG_CPU_CP15 / else */
