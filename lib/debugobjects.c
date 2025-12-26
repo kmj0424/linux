@@ -26,7 +26,7 @@
 #define ODEBUG_BATCH_SIZE	16
 
 /* Initial values. Must all be a multiple of batch size */
-#define ODEBUG_POOL_SIZE	(64 * ODEBUG_BATCH_SIZE)
+#define ODEBUG_POOL_SIZE	(64 * ODEBUG_BATCH_SIZE) // ODEBUG_POOL_SIZE
 #define ODEBUG_POOL_MIN_LEVEL	(ODEBUG_POOL_SIZE / 4)
 
 #define ODEBUG_POOL_PERCPU_SIZE	(8 * ODEBUG_BATCH_SIZE)
@@ -44,8 +44,8 @@
 #define ODEBUG_FREE_WORK_DELAY	DIV_ROUND_UP(HZ, 10)
 
 struct debug_bucket { // debug_bucket
-	struct hlist_head	list;
-	raw_spinlock_t		lock;
+	struct hlist_head	list; // hlist_head
+	raw_spinlock_t		lock; // 락 상태
 };
 
 struct pool_stats {
@@ -1425,6 +1425,7 @@ void __init debug_objects_early_init(void) // debug_objects_early_init __init �
 	hlist_add_head() : 해시 리스트(hlist)의 맨 앞에 노드 추가
 	debugobjects가 쓸 수 있는 모든 static 오브젝트를 부트 전용 리스트(pool_boot)에 전부 연결해 둔다.
 	해시 테이블 : 키와 밸류를 매핑한 추상 자료형인 연관 배열을 구현하는 자료구조
+	lockdep은 리눅스 커널에서 잠재적인 데드락(deadlock)을 탐지하고 예측하기 위한 강력한 디버깅 도구
 	*/
 	int i;
 
@@ -1451,7 +1452,7 @@ void __init debug_objects_early_init(void) // debug_objects_early_init __init �
 	for (i = 0; i < ODEBUG_POOL_SIZE; i++) // 미리 만들어둔 debug objects 전부 부트용 풀 리스트에 연결
 	/*
 	추적용으로 쓰는 debug_obj(메타데이터)를 풀로 관리
-	POOL_SIZE = 512
+	POOL_SIZE = 64 * 16
 	*/
 		hlist_add_head(&obj_static_pool[i].node, &pool_boot);
 	/*
