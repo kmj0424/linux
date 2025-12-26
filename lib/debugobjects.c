@@ -18,7 +18,7 @@
 #include <linux/seq_file.h>
 #include <linux/slab.h>
 #include <linux/static_key.h>
-
+//ODEBUG
 #define ODEBUG_HASH_BITS	14
 #define ODEBUG_HASH_SIZE	(1 << ODEBUG_HASH_BITS)
 
@@ -26,7 +26,7 @@
 #define ODEBUG_BATCH_SIZE	16
 
 /* Initial values. Must all be a multiple of batch size */
-#define ODEBUG_POOL_SIZE	(64 * ODEBUG_BATCH_SIZE)
+#define ODEBUG_POOL_SIZE	(64 * ODEBUG_BATCH_SIZE) // ODEBUG_POOL_SIZE
 #define ODEBUG_POOL_MIN_LEVEL	(ODEBUG_POOL_SIZE / 4)
 
 #define ODEBUG_POOL_PERCPU_SIZE	(8 * ODEBUG_BATCH_SIZE)
@@ -43,9 +43,9 @@
 #define ODEBUG_FREE_WORK_MAX	(1024 / ODEBUG_BATCH_SIZE)
 #define ODEBUG_FREE_WORK_DELAY	DIV_ROUND_UP(HZ, 10)
 
-struct debug_bucket {
-	struct hlist_head	list;
-	raw_spinlock_t		lock;
+struct debug_bucket { // debug_bucket
+	struct hlist_head	list; // hlist_head
+	raw_spinlock_t		lock; // 락 상태
 };
 
 struct pool_stats {
@@ -1409,16 +1409,56 @@ static inline bool debug_objects_selftest(void) { return true; }
  * the static object pool objects into the poll list. After this call
  * the object tracker is fully operational.
  */
-void __init debug_objects_early_init(void) // debug_objects_early_init
+void __init debug_objects_early_init(void) // debug_objects_early_init __init 부팅중에만 사용, 런타임 x, 부팅 전용 초기화 코드, 부팅 끝나면 버려짐
 {
+	/*
+	obj_hash : debugobjects가 관리 중인 오브젝트들을 빠르게 찾기 위한 해시 테이블, 각 버킷(bucket)마다 락이 하나씩 있음
+	ODEBUG_HASH_SIZE : 해시 테이블의 크기 (버킷 개수)
+	raw_spin_lock_init() : 아주 낮은 수준의 스핀락 초기화, 일반 spin_lock보다 더 원시적인 락
+	아직 스케줄러, preemption, IRQ 관리가 완전히 준비되지 않았음 그래서 최소한의 락만 써야 함
+	debugobjects 해시 테이블의 각 버킷에 들어 있는 락을 ‘사용 가능 상태’로 초기화한다.
+	이걸 안 하면 나중에 debugobjects가 오브젝트를 추적하다가 락을 잡는 순간 커널이 바로 터짐
+	obj_static_pool : 정적으로 미리 만들어 둔 debug object 풀, 동적 할당이 안 되는 시점을 대비한 예비 오브젝트들
+	ODEBUG_POOL_SIZE : 이 static 풀에 들어 있는 오브젝트 개수
+	obj_static_pool[i].node : 각 오브젝트가 리스트에 들어가기 위한 hlist_node
+	pool_boot : 부팅 초기에만 사용하는 임시 리스트, 지금은 다 여기 넣어두는 용도
+	hlist_add_head() : 해시 리스트(hlist)의 맨 앞에 노드 추가
+	debugobjects가 쓸 수 있는 모든 static 오브젝트를 부트 전용 리스트(pool_boot)에 전부 연결해 둔다.
+	해시 테이블 : 키와 밸류를 매핑한 추상 자료형인 연관 배열을 구현하는 자료구조
+	lockdep은 리눅스 커널에서 잠재적인 데드락(deadlock)을 탐지하고 예측하기 위한 강력한 디버깅 도구
+	*/
 	int i;
 
 	for (i = 0; i < ODEBUG_HASH_SIZE; i++)
-		raw_spin_lock_init(&obj_hash[i].lock);
-
-	/* Keep early boot simple and add everything to the boot list */
-	for (i = 0; i < ODEBUG_POOL_SIZE; i++)
+	/*
+	ODEBUG_HASH_BITS = 14, ODEBUG_HASH_SIZE (1<<O_H_B) 시프틑 연산 2^14
+	객체 추적용 해시 테이블의 각 버킷에 들어있는 스핀락을 초기화
+	객체 추적 : 객체 주소를 해시해서 버킷에 넣는 방식
+	동시에 여러 CPU가 접근할 수 있으므로 락이 필요
+	*/
+		raw_spin_lock_init(&obj_hash[i].lock); // 스핀락 내부 값을 언락 상태로 초기화, 디버그용 magic 값 세팅
+		//raw spinlock 은 스케줄러가 없는 상태에서도 쓸 수 있는 raw 스핀락
+	/*
+	i번째 해시 버킷에 대해 이 버킷을 동시에 여러 CPU가 건드려도 깨지지 않도록
+	사용할 스핀락을 아직 아무도 잡고 있지 않은 상태로 초기화한다.
+	Keep early boot simple and add everything to the boot list
+	부팅 초반은 단순하게 유지하고, 모든 것을 부트 리스트에 넣어둔다. */
+	// 모든 버킷이 락 사용 가능 상태
+	/*
+	객체 추적을 위해 만들어 둔 해시 테이블에는 여러 개의 해시 버킷이 있음
+	그 각 버킷마다 동시 접근을 막기 위한 스핀락이 하나씩 들어 있고
+	그 모든 버킷에 대해서 부팅 초반부터 사용할 수 있도록 스핀락을 초기화한다.
+	*/
+	for (i = 0; i < ODEBUG_POOL_SIZE; i++) // 미리 만들어둔 debug objects 전부 부트용 풀 리스트에 연결
+	/*
+	추적용으로 쓰는 debug_obj(메타데이터)를 풀로 관리
+	POOL_SIZE = 64 * 16
+	*/
 		hlist_add_head(&obj_static_pool[i].node, &pool_boot);
+	/*
+	부팅 초반에는 동적 메모리 할당이 아직 안정적이지 않아서 미리 정적으로 준비해둔 객체 추적용 슬롯( obj_static_pool[] )을 쓴다.
+	그리고 그 슬롯들을 나중에 하나씩 꺼내 쓸 수 있도록 ODEBUG_POOL_SIZE 전부를 부트용 free 리스트( pool_boot )에 연결해 둔다.
+	*/
 }
 
 /*

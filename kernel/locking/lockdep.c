@@ -806,10 +806,24 @@ static void lockdep_print_held_locks(struct task_struct *p)
 
 static void print_kernel_ident(void)
 {
-	printk("%s %.*s %s\n", init_utsname()->release,
+	printk("%s %.*s %s\n", init_utsname()->release, // 커널 릴리즈 버전 문자열 / struct uts_namespace 시스템 전체의 커널 버전 정보 저장
 		(int)strcspn(init_utsname()->version, " "),
 		init_utsname()->version,
+		/*
+		init_utsname()->version 커널 빌드 버전 문자열
+		strcspn(str, " ") 문자열에서 첫 공백이 나오기 전까지의 길이를 구함
+		
+		*/
 		print_tainted());
+		/*
+		커널의 taint 상태 문자열 반환
+		taint?
+		커널이 정상 상태가 아니다라고 표시한 플래그들
+		서드파티 모듈 로드
+		강제 언로드
+		하드웨어 오류
+		WARN 발생
+		*/
 }
 
 static int very_verbose(struct lock_class *class)
@@ -6668,36 +6682,46 @@ void __init lockdep_init(void)
 	       sizeof(((struct task_struct *)NULL)->held_locks));
 }
 
+/*
+현재 태스크가 잡고 있는(held) 락이 포함된 메모리를 free 하려고 할 때 발생하는 치명적인 버그 상황을 출력하는 함수.
+*/
 static void
 print_freed_lock_bug(struct task_struct *curr, const void *mem_from,
-		     const void *mem_to, struct held_lock *hlock)
+		     const void *mem_to, struct held_lock *hlock) // print_freed_lock_bug
 {
-	if (!debug_locks_off())
+	if (!debug_locks_off()) // lockdep 디버그가 이미 꺼진 상태이거나, 추가 경고를 출력하면 안 되는 경우에는 바로 종료(연쇄 경고, 재진입, 로그 폭발 방지 목적)
 		return;
-	if (debug_locks_silent)
+	if (debug_locks_silent) // lockdep 경고를 조용히 처리하도록 설정된 경우 출력 생략
 		return;
 
-	nbcon_cpu_emergency_enter();
+	nbcon_cpu_emergency_enter(); // 콘솔 출력 중 재진입/락 꼬임을 방지하기 위한 CPU 단위 비상 출력 구간 진입
 
+	// pr_warn : 커널에서 경고 수준의 메시지를 출력하기 위한 printk 기반 매크로
 	pr_warn("\n");
 	pr_warn("=========================\n");
 	pr_warn("WARNING: held lock freed!\n");
-	print_kernel_ident();
+	print_kernel_ident(); // 커널 식별 정보 출력 (커널 버전/빌드 정보 등)
 	pr_warn("-------------------------\n");
+	// 어떤 태스크가 어떤 메모리 범위를 free 하려 했는지 출력 mem_to는 내부적으로 [from, to) 범위이므로 사람이 보기 쉽게 mem_to - 1까지 출력
 	pr_warn("%s/%d is freeing memory %px-%px, with a lock still held there!\n",
 		curr->comm, task_pid_nr(curr), mem_from, mem_to-1);
-	print_lock(hlock);
-	lockdep_print_held_locks(curr);
+	print_lock(hlock); // 문제가 된 락(held lock) 하나에 대한 상세 정보 출력
+	lockdep_print_held_locks(curr); // 현재 태스크가 잡고 있는 모든 락 목록 출력
 
-	pr_warn("\nstack backtrace:\n");
+	pr_warn("\nstack backtrace:\n"); // 스택 백트레이스 출력: free 호출 경로 추적 목적
 	dump_stack();
 
-	nbcon_cpu_emergency_exit();
+	nbcon_cpu_emergency_exit(); // 비상 콘솔 출력 구간 종료
 }
 
 static inline int not_in_range(const void* mem_from, unsigned long mem_len,
-				const void* lock_from, unsigned long lock_len)
+				const void* lock_from, unsigned long lock_len) // not_in_range
 {
+	/*
+	mem_from : 지금 free 하려는 메모리 블록의 시작 주소
+	mem_len : free 하려는 메모리 블록의 길이
+	mem_from ~ mem_from + mem_len 범위가 해제 대상 메모리
+	*/
 	return lock_from + lock_len <= mem_from ||
 		mem_from + mem_len <= lock_from;
 }
@@ -6707,30 +6731,43 @@ static inline int not_in_range(const void* mem_from, unsigned long mem_len,
  * is destroyed or reinitialized - this code checks whether there is
  * any held lock in the memory range of <from> to <to>:
  */
-void debug_check_no_locks_freed(const void *mem_from, unsigned long mem_len)
+/*
+raw_local_irq_save(flags) / raw_local_irq_restore(flags)
+로컬 CPU 인터럽트 on/off
+save는 끄기 전에 상태(flags)를 저장하고, restore는 그 상태로 되돌림.
+lockdep 상태를 읽는 동안(특히 같은 CPU에서) IRQ로 인한 상태 변화/재진입을 줄이기 위해 로컬 IRQ를 끈다.
+IRQ(Interrupt Request 인터럽트 요청)
+*/
+void debug_check_no_locks_freed(const void *mem_from, unsigned long mem_len) //debug_check_no_locks_freed
 {
-	struct task_struct *curr = current;
-	struct held_lock *hlock;
-	unsigned long flags;
+	struct task_struct *curr = current; // 현재 CPU에서 실행 중인 태스크의 task_struct(lockdep의 held_lock, lockdep_depth)
+	struct held_lock *hlock; // held_locks 배열의 한 원소(현재 잡고 있는 락 1개에 대한 정보)
+	unsigned long flags; // 로컬 IRQ 상태 저장/복원용 플래그
 	int i;
 
-	if (unlikely(!debug_locks))
+	if (unlikely(!debug_locks)) // debug_locks가 꺼져 있으면(락 디버깅 비활성) 아무것도 안 함.
+	// unlikely : 분기 예측 힌트 / 이 조건은 거의 false라고 컴파일러에 알려서 성능 최적화.
 		return;
 
-	raw_local_irq_save(flags);
+	raw_local_irq_save(flags);// 검사하는 동안 현재 태스크의 lockdep 자료구조가 중간에 꼬이는 걸 최대한 막기 위해 로컬 CPU 인터럽트를 끔. 끈 상태를 flags에 저장해두고, 끝나면 복원.
 	for (i = 0; i < curr->lockdep_depth; i++) {
 		hlock = curr->held_locks + i;
+		/*
+		lockdep_depth : 현재 태스크가 몇 개의 락을 held 상태로 추적 중인지
+		hlock = i번째로 잡고 있는 락 정보
+		*/
+	//hlock->instance: 현재 잡고 있는 락의 실제 메모리 인스턴스 주소
+	if (not_in_range(mem_from, mem_len, hlock->instance,
+		sizeof(*hlock->instance))) // 각 held lock이 가리키는 락 인스턴스 (mem_from, mem_from+mem_len) 주소가 free하려는 메모리 범위 안인지 체크
+			continue; // 이 락 인스턴스 주소가 해제하려는 메모리 범위 밖이면 스킵
 
-		if (not_in_range(mem_from, mem_len, hlock->instance,
-					sizeof(*hlock->instance)))
-			continue;
-
-		print_freed_lock_bug(curr, mem_from, mem_from + mem_len, hlock);
-		break;
+		print_freed_lock_bug(curr, mem_from, mem_from + mem_len, hlock); // 문제 발생시에 로그경고 남기고 탈출
+		break; // 버그 보고(로그) 후 더 이상 반복하지 않음(첫 발견만 보고) / free된 메모리를 락이 가리키는 상황(UAF 위험)
+		// held lock 인스턴스가 free되는 메모리에 포함됨(Use-After-Free 위험) → 버그 출력
 	}
-	raw_local_irq_restore(flags);
+	raw_local_irq_restore(flags); // 인터럽트 상태 복원
 }
-EXPORT_SYMBOL_GPL(debug_check_no_locks_freed);
+EXPORT_SYMBOL_GPL(debug_check_no_locks_freed); // 다른 커널 코드/모듈이 이 함수를 호출할 수 있게 export.
 
 static void print_held_locks_bug(void)
 {

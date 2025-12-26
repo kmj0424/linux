@@ -1023,21 +1023,34 @@ static inline void hlist_del_init(struct hlist_node *n)
 }
 
 /**
- * hlist_add_head - add a new entry at the beginning of the hlist
- * @n: new entry to be added
- * @h: hlist head to add it after
+ * hlist_add_head - add a new entry at the beginning of the hlist / hlist_add_head - hlist의 맨 앞에 새로운 엔트리를 추가한다
+ * @n: new entry to be added / @n: 새로 추가할 엔트리
+ * @h: hlist head to add it after /  @h: 이 엔트리를 추가할 hlist의 헤드
  *
- * Insert a new entry after the specified head.
- * This is good for implementing stacks.
+ * Insert a new entry after the specified head. / 지정된 헤드 바로 뒤에 새로운 엔트리를 삽입한다.
+ * This is good for implementing stacks. / 이 방식은 스택 구조를 구현하는 데 적합하다.
+ * hlist_add_head는 해시 리스트의 헤드 바로 뒤에 노드를 삽입하여, 스택처럼 동작하게 하는 함수이다.
  */
-static inline void hlist_add_head(struct hlist_node *n, struct hlist_head *h)
+static inline void hlist_add_head(struct hlist_node *n, struct hlist_head *h) //hlist_add_head
 {
+	/*
+	hlist 특징 : head에는 first 포인터 1개만 존재 / node는 next node, 나를 가르키는 prev의 주소를 가진다.
+	hlist는 head에 포인터 하나만 두고 원형 불변식을 유지하지 않으며, 빈 버킷이 많은 해시 테이블 환경에 최적화되어 있어 list_head보다 메모리와 연산 측면에서 더 가볍다.
+
+	WRITE_ONCE(x, v) : 컴파일러가 x에 대한 쓰기를 합치거나 재정렬하거나 반복 로드, 스토어 하지 못하게 하는 도구
+	*/
 	struct hlist_node *first = h->first;
-	WRITE_ONCE(n->next, first);
-	if (first)
-		WRITE_ONCE(first->pprev, &n->next);
-	WRITE_ONCE(h->first, n);
-	WRITE_ONCE(n->pprev, &h->first);
+	WRITE_ONCE(n->next, first); // 새 노드 n의 next를 기존 first로 연결 이제 n -> first로 이어짐
+	if (first) // 기존 first가 있으면
+		WRITE_ONCE(first->pprev, &n->next); //  first의 pprev를 n->next의 주소로 바꿈
+	/*
+	원래 first의 pprev는 &h->first였음(첫 노드였으니까)
+	이제 first는 두 번째 노드가 돼서 first를 가리키는 포인터 위치는 n->next가 됨
+	그래서 first->pprev = &n->next
+	*/
+	WRITE_ONCE(h->first, n); // head의 first를 n으로 갱신(맨 앞으로) 이제 list의 시작점이 n
+	WRITE_ONCE(n->pprev, &h->first); // n의 pprev를 head->first의 주소로 설정
+	// n은 첫 노드니까 n을 가리키는 링크 칸은 h->first 그래서 n->pprev = &h->first
 }
 
 /**

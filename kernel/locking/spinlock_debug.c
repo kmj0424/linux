@@ -21,13 +21,17 @@ void __raw_spin_lock_init(raw_spinlock_t *lock, const char *name,
 	/*
 	 * Make sure we are not reinitializing a held lock:
 	 */
-	debug_check_no_locks_freed((void *)lock, sizeof(*lock));
-	lockdep_init_map_wait(&lock->dep_map, name, key, 0, inner);
+	debug_check_no_locks_freed((void *)lock, sizeof(*lock)); //free된 락을 다시 초기화하려는 버그,락을 잡은 채로 메모리가 해제된 버그
+	lockdep_init_map_wait(&lock->dep_map, name, key, 0, inner); //이 락을 lockdep 시스템에 등록/초기화
+	//이 락은 어떤 클래스인지(key), 이름은 뭐고(name), subclass는 뭔지(0), wait 타입은 뭔지(inner)를 세팅.
 #endif
-	lock->raw_lock = (arch_spinlock_t)__ARCH_SPIN_LOCK_UNLOCKED;
-	lock->magic = SPINLOCK_MAGIC;
-	lock->owner = SPINLOCK_OWNER_INIT;
-	lock->owner_cpu = -1;
+	// arch_spinlock_t는 CPU가 원자적 명령으로 바꿀 실제 필드를 가진 구조체/타입
+	// 원자적 명령 : 컴퓨터 과학에서 더 이상 쪼갤 수 없는 최소 단위로 실행되어 중간에 중단되거나 다른 연산에 방해받지 않고 완전하게 수행되는 연산
+	lock->raw_lock = (arch_spinlock_t)__ARCH_SPIN_LOCK_UNLOCKED; // 아키텍처별 실제 락 변수(예: ARM의 티켓락/큐락, x86의 티켓락 등)를 unlocked 상태로 둠.
+	lock->magic = SPINLOCK_MAGIC; // 이 락은 정상적으로 초기화되었다는 매직 값, 메모리 오염/미초기화 락을 감지하는 용도.
+	//메모리 오염 : 프로그램이 할당된 메모리 영역을 벗어나거나, 해제된 메모리를 잘못 사용하는 등 메모리 주소를 잘못 조작하여 데이터가 덮어쓰여지거나 손상되는 현상
+	lock->owner = SPINLOCK_OWNER_INIT; // 디버그 옵션에서 현재 락 소유자(어떤 task가 잡았는지)를 추적하는 필드의 초기값.
+	lock->owner_cpu = -1; // 어느 CPU가 이 락을 소유 중인지 기록(보통 per-CPU 디버깅). 초기에는 아무도 소유하지 않으니 -1.
 }
 
 EXPORT_SYMBOL(__raw_spin_lock_init);

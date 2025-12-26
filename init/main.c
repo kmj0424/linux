@@ -929,7 +929,7 @@ void start_kernel(void) //시작
 	/*
 	디버깅이나 크래시상황에 오버플로우 확인하기 위함 
 	*/
-	smp_setup_processor_id();
+	smp_setup_processor_id(); //arch/arm/kernel/setup.c
 	/*
 	지금 코드를 실행중인 CPU processor id 확정
 	cpu processor id -> cpu siblings -> 소켓
@@ -977,6 +977,16 @@ void start_kernel(void) //시작
 	debug_objects_early_init();
 	/*
 	커널의 디버그 오브젝트 추적 서브 시스템을 초기에 켜는 작업
+	디버그오브젝트도 smp처럼 의미가 있는 것인가?
+	커널 안에 debugobjects라는 디버깅 서브시스템(프레임워크)이 있음
+	그게 타이머/워크큐/RCU head 같은 커널 오브젝트들의 수명(lifetime) 규칙을 추적하기 위해
+	내부적으로 추적용 엔트리(=debug object record)를 만들어 관리
+	디버그 오브젝트는 실제 커널 오브젝트(커널에 의해 생성되는 메모립 블록)가 아닌 추적하긴 메타데이터(데이터에 관한 데이터) 레코드(묶음)
+	커널 객체의 잘못된 생명주기를 잡아냄
+	초기화 안 된 객체 사용
+	이미 해제된 객체 재사용
+	double init(두번 초기화) / double free(두번 할당 해제)
+	대표적으로 감시하는 객체들 : timers / workqueues / rcu head / completion / perf events 등
 	*/
 	init_vmlinux_build_id();
 	/*

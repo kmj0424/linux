@@ -204,9 +204,16 @@ struct list_head {
 struct hlist_head {
 	struct hlist_node *first;
 };
-
+// hlist_node
 struct hlist_node {
 	struct hlist_node *next, **pprev;
+	/*
+	*prev 가 아니라 **pprev?
+	나를 가리키는 포인터의 주소여서 **pprev
+	B->pprev = &A->next
+	내가 head의 첫 노드면 :n->pprev = &h->first
+	내가 어떤 노드의 다음이면 : n->pprev = &prevn->next
+	*/
 };
 
 struct ustat {
