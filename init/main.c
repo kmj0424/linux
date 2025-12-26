@@ -993,6 +993,8 @@ void start_kernel(void) //시작
 	현재 부팅 중인 커널 이미지
 	*/
 	cgroup_init_early();
+	/*
+	*/
 
 	local_irq_disable();
 	early_boot_irqs_disabled = true;
