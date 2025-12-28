@@ -366,16 +366,59 @@ int build_id_parse_buf(const void *buf, unsigned char *build_id, u32 buf_size)
 
 #if IS_ENABLED(CONFIG_STACKTRACE_BUILD_ID) || IS_ENABLED(CONFIG_VMCORE_INFO)
 unsigned char vmlinux_build_id[BUILD_ID_SIZE_MAX] __ro_after_init;
+/*
+CONFIG_STACKTRACE_BUILD_ID : 커널이 스택 트레이스 출력할 떄 Build ID 정보를 함께 활용할 수 있게 하는 옵션
+->크래시 로그를 분석할 때, 이 스택 트레이스가 정확히 어떤 vmlinux와 매칭되는지를 Build ID로 확인 가능
+?스택 트레이스
 
+CONFIG_VMCORE_INFO : kdump 같은 크래시 덤프(vmcore) 분석을 위해 커널 메모리 덤프에 필요한 메타 정보(vmcoreinfo)를 제공하는 옵션
+vmcore 분석에서도 어떤 커널 빌드냐가 중요해서 Build ID가 유용함
+
+IS_ENABLED(x) : 옵션이 y로 빌트인(y)이거나, 경우에 따라 모듈(m)로 활성화되었는지를 C 전처리 단계에서 안전하게 판정하려고 쓰는 매크로
+
+vmlinux_build_id : 커널(vmlinux)의 Build ID 바이트들을 저장해두는 버퍼
+unsigned char[]인 이유 : Build ID는 문자열이 아니라 바이너리 바이트 시퀸스
+바이너리 바이트 시퀸스 : 컴퓨터가 데이터를 처리하는 기본 단위인 0과 1로 이루어진 바이트들이 순서대로 나열된 형태
+?바이트를 저장하는데 왜 unsigned char인가?
+
+BUILD_ID_SIZE_MAX : Build ID가 어떤 길이든 담을 수 있게 최대 크기로 만들어둔 배열
+Build ID는 길이가 고정이 아닐 수 있는데(노트 형식/해시 종류에 따라) 커널에서는 최대 길이를 상수로 잡아서 그만큼 버퍼를 확보함
+
+__ro_after_init : init 끝난 뒤에 read-only로 만들겠다는 어트리뷰트
+?어트리뷰트가 뭔데
+이 값은 부팅때 한 번 계산해서 저장하면 끝이라서, 이후엔 수정될 이유가 없음
+이후에 읽기 전용으로 바꾸면 버그나 공격으로 값이 변조될 가능성이 줄어듦
+-> init 코드에서만 채워지고 init이후에는 커널이 이 메모리를 쓰기 금지로 보호할 수 있음(커널의 rodata보호 메커니즘과 연결)
+?rodata보호 메커니즘?
+*/
 /**
  * init_vmlinux_build_id - Compute and stash the running kernel's build ID
  */
-void __init init_vmlinux_build_id(void)
+void __init init_vmlinux_build_id(void) // init_vmlinux_build_id
 {
 	extern const void __start_notes;
 	extern const void __stop_notes;
+	/*
+	경계 심볼 : 링크 스트립트가 notes 섹션의 시작/끝 주소를 심볼로 박아주는 형태
+	-> extren 으로 그런 심볼이 어딘가에 있으니 주소를 가져다 쓰겠다는 뜻
+	Build ID는 ELF note 영역에 들어있음
+	커널 이미지(vmlinux)애도 note 섹션들이 있고, 그 중에 build-id 노트가 있음
+	커널은 부팅 시점에 그 노트 섹션 범위를 메모리에서 찾아서 파싱하려 함
+	*/
 	unsigned int size = &__stop_notes - &__start_notes;
+	/*
+	size 계산 : &__stop_notes ~ &__start_notes 사이가 notes 데이터 덩어리라고 보고 그 길이를 size로 구해서 파서에 넘김
+	*/
 
 	build_id_parse_buf(&__start_notes, vmlinux_build_id, size);
+	/*
+	&__start_notes : notes 영역의 시작 주소(여기부터 파싱 시작)
+	&__stop_notes : notes 영역 끝 주소
+	vmlinux_build_id : 파싱해서 얻은 Build ID 바이트를 여기에 복사해서 저장할 목적지 버퍼
+	size : notes 영역의 총 크기 / 파서는 이 범위를 넘어가지 않게 안전하게 탐색하면서 build-id note를 찾음
+
+	notes 버퍼를 note 포멧(ELF note)단위로 순회하면서 이 노트가 build-id 인지 확인하고 맞으면 desc(payload)부분을 꺼내서 vmlinux_build_id로 복사
+	실패하면(해당 노트가 없거나 손상) 보통은 0으로 남거나, 어떤 방식으로든 없음 상태로 처리
+	*/
 }
 #endif

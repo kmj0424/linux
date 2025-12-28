@@ -990,7 +990,25 @@ void start_kernel(void) //시작
 	*/
 	init_vmlinux_build_id();
 	/*
-	현재 부팅 중인 커널 이미지
+	지금 실행 중인 커널(vmlinux)의 Build ID를 부팅 초기에 계산해서 전역 배열에 저장
+	vmlinux : vmlinux는 압축되지 않은 커널 이미지를 ELF 형식으로 담고 있는 정적 링크된 실행 파일이라서, 사실상 커널 그 자체
+	커널 이미지 : 커널이 하나의 파일로 디스크에 저장되어 있는 것
+	Build ID란 이 커널 바이너리가 정확히 어떤 빌드 결과물인지 식별하는 지문(fingerprint) 같은 값
+	커널 크래시 로그/스택트레이스 분석
+	커널이 뿌린 주소/심볼이 어떤 vmlinux 디버그 심볼 파일과 맞는지 확인해야 함
+	Build ID가 있으면 이 덤프/로그는 이 vmlinu와 정확히 한 쌍이라는 걸 강하게 보장 가능
+
+	kdump(vmcore) 분석
+	vmcore를 crash 툴로 분석할 때도 커널 빌드 식별이 필요하고, vmcoreinfo와 엮여서 분석 정확도를 올림
+
+	커널이 notes 섹션 시작/끝 주소를 링커 심볼로 받음
+	그 범위를 build-id가 들어있는 곳으로 보고 크기 계산
+	builld_id_parse_buf()러 notes를 파싱 후
+	찾은 Build ID를 전역 배열 vmlinux_builld_id에 저장
+	init 이후에는 __ro_after_init로 보호(읽기 전용)
+
+	note란 : ELF 파일 안에 들어가는 작은 메타데이터 블록이다(이 바이너리에 대한 설명서 조각 같은 것 / 코드 x, 데이터 x)
+	
 	*/
 	cgroup_init_early();
 	/*
