@@ -988,7 +988,7 @@ void start_kernel(void) //시작
 	double init(두번 초기화) / double free(두번 할당 해제)
 	대표적으로 감시하는 객체들 : timers / workqueues / rcu head / completion / perf events 등
 	*/
-	init_vmlinux_build_id();
+	init_vmlinux_build_id(); //lib/buildid.c
 	/*
 	지금 실행 중인 커널(vmlinux)의 Build ID를 부팅 초기에 계산해서 전역 배열에 저장
 	vmlinux : vmlinux는 압축되지 않은 커널 이미지를 ELF 형식으로 담고 있는 정적 링크된 실행 파일이라서, 사실상 커널 그 자체
@@ -1008,7 +1008,10 @@ void start_kernel(void) //시작
 	init 이후에는 __ro_after_init로 보호(읽기 전용)
 
 	note란 : ELF 파일 안에 들어가는 작은 메타데이터 블록이다(이 바이너리에 대한 설명서 조각 같은 것 / 코드 x, 데이터 x)
-	
+	ELF 파일에는 코드 섹션(.text), 데이터 섹션(.data, .rodata), 심볼 정보, 디버그 정보, note 섹션
+	note 섹션 특징 : 실행 흐름과는 무관, CPU가 실행하지 않음, 툴/커널/디버거가 정보 일기용으로만 사용
+	Build ID는 ELF note 안에 존재
+	Build-id = note 안의 desc 데이터
 	*/
 	cgroup_init_early();
 	/*

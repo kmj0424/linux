@@ -1255,7 +1255,7 @@ static inline int ra_has_index(struct file_ra_state *ra, pgoff_t index)
  * @f_freeptr: Pointer used by SLAB_TYPESAFE_BY_RCU file cache (don't touch.)
  * @f_ref: reference count
  */
-struct file {
+struct file { // file
 	spinlock_t			f_lock;
 	fmode_t				f_mode;
 	const struct file_operations	*f_op;

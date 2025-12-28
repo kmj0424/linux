@@ -28,7 +28,7 @@ void freader_init_from_mem(struct freader *r, const char *data, u64 data_sz)
 	r->data_sz = data_sz;
 }
 
-static void freader_put_folio(struct freader *r)
+static void freader_put_folio(struct freader *r) //freader_put_folio
 {
 	if (!r->folio)
 		return;
@@ -131,7 +131,7 @@ const void *freader_fetch(struct freader *r, loff_t file_off, size_t sz)
 	return r->addr + (file_off - r->folio_off);
 }
 
-void freader_cleanup(struct freader *r)
+void freader_cleanup(struct freader *r) // freader_cleanup
 {
 	if (!r->buf)
 		return; /* non-file-backed mode */
@@ -145,7 +145,7 @@ void freader_cleanup(struct freader *r)
  * identical.
  */
 static int parse_build_id(struct freader *r, unsigned char *build_id, __u32 *size,
-			  loff_t note_off, Elf32_Word note_size)
+			  loff_t note_off, Elf32_Word note_size) // parse_build_id
 {
 	const char note_name[] = "GNU";
 	const size_t note_name_sz = sizeof(note_name);
@@ -153,7 +153,9 @@ static int parse_build_id(struct freader *r, unsigned char *build_id, __u32 *siz
 	const Elf32_Nhdr *nhdr;
 	const char *data;
 
-	if (check_add_overflow(note_off, note_size, &note_end))
+	if (check_add_overflow(
+		
+		note_off, note_size, &note_end))
 		return -EINVAL;
 
 	while (note_end - note_off > sizeof(Elf32_Nhdr) + note_name_sz) {
@@ -353,10 +355,10 @@ int build_id_parse(struct vm_area_struct *vma, unsigned char *build_id, __u32 *s
  */
 int build_id_parse_buf(const void *buf, unsigned char *build_id, u32 buf_size)
 {
-	struct freader r;
+	struct freader r; // include/linux/buildid.h
 	int err;
 
-	freader_init_from_mem(&r, buf, buf_size);
+	freader_init_from_mem(&r, buf, buf_size); // 메모리 모드로 초기화
 
 	err = parse_build_id(&r, build_id, NULL, 0, buf_size);
 
@@ -404,6 +406,7 @@ void __init init_vmlinux_build_id(void) // init_vmlinux_build_id
 	Build ID는 ELF note 영역에 들어있음
 	커널 이미지(vmlinux)애도 note 섹션들이 있고, 그 중에 build-id 노트가 있음
 	커널은 부팅 시점에 그 노트 섹션 범위를 메모리에서 찾아서 파싱하려 함
+	note들이 모여 있는 메모리 범위의 시작과 끝
 	*/
 	unsigned int size = &__stop_notes - &__start_notes;
 	/*
@@ -417,6 +420,7 @@ void __init init_vmlinux_build_id(void) // init_vmlinux_build_id
 	vmlinux_build_id : 파싱해서 얻은 Build ID 바이트를 여기에 복사해서 저장할 목적지 버퍼
 	size : notes 영역의 총 크기 / 파서는 이 범위를 넘어가지 않게 안전하게 탐색하면서 build-id note를 찾음
 
+	notes 전체를 스캔해서 build-id note를 찾아라
 	notes 버퍼를 note 포멧(ELF note)단위로 순회하면서 이 노트가 build-id 인지 확인하고 맞으면 desc(payload)부분을 꺼내서 vmlinux_build_id로 복사
 	실패하면(해당 노트가 없거나 손상) 보통은 0으로 남거나, 어떤 방식으로든 없음 상태로 처리
 	*/

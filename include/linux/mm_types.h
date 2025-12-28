@@ -373,7 +373,7 @@ typedef unsigned short mm_id_t;
  * at an arbitrary page offset, but its kernel virtual address is aligned
  * to its size.
  */
-struct folio {
+struct folio { //folio
 	/* private: don't document the anon union */
 	union {
 		struct {
