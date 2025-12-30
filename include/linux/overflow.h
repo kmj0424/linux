@@ -48,25 +48,51 @@
  * both the type-agnostic benefits of the macros while also being able to
  * enforce that the return value is, in fact, checked.
  */
-static inline bool __must_check __must_check_overflow(bool overflow)
+static inline bool __must_check __must_check_overflow(bool overflow) // __must_check_overflow
 {
-	return unlikely(overflow);
+	return unlikely(overflow); // 오버플로우는 true가 되는 경우가 드물다는 힌트
+	/*
+	unlikely : compiler.h 계열 헤더에서 __builtin_expect로 래핑돼있는 성능 최적화용 분기 힌트 매크로
+	어느쪽 코드로 갈지
+	
+	__must_check : 함수의 리턴 값을 무시하면 컴파일러가 경고를 내게 하는 속성
+	커널에서 오버플로우가 났는지 반드시 체크하라는 의도
+
+	__buildin_add_overflow()의 결과(treu/false)를 한번 더 감싸서 __must_check 속성을 붙이고
+	안에서 unlikely(overflow)만 반환
+	*/
 }
 
 /**
  * check_add_overflow() - Calculate addition with overflow checking
- * @a: first addend
+ * 오버플로를 체크하면서 덧셈을 계산하는 함수(매크로)
+ * @a: first addend\
+ * 첫번째 피연산자
  * @b: second addend
+ * 두번째 피연산자
  * @d: pointer to store sum
- *
+ * 덧셈 결과를 저장할 포인터 
+ * 
  * Returns true on wrap-around, false otherwise.
- *
+ * 덧셈 결과가 타입 범위를 넘어 wrap-aound(오버플로)하면, true, 아니면 false 반환
+ * 
  * *@d holds the results of the attempted addition, regardless of whether
  * wrap-around occurred.
+ * 오버플로가 나든 말든, *d에는 시도된 덧셈 결과가 항상 들어감
  */
+// check_add_overflow
 #define check_add_overflow(a, b, d)	\
 	__must_check_overflow(__builtin_add_overflow(a, b, d))
+/*
+__builtin_add_overflow(T a, T b, T *res)
+a + b를 계산해서 *res에 저장
+결과가 타입 T의 범위를 벗어나면 true, 아니면 false
+signed/unsigned 모두 정의된 방식으로 overflow를 감지할 수 있게 해준다
+커널이 직접 덧셈/캐스팅 트릭을 쓰지 않고, 컴파일러가 제공하는 안전한 오버플로우 감지 primitive를 그대로 래핑
 
+__must_check_overflow
+커널쪽에서 반드시 반환 값을 사용해라 라고 강제하기 위한 래퍼
+*/
 /**
  * wrapping_add() - Intentionally perform a wrapping addition
  * @type: type for result of calculation

@@ -73,23 +73,40 @@ static int freader_get_folio(struct freader *r, loff_t file_off)
 	return 0;
 }
 
-const void *freader_fetch(struct freader *r, loff_t file_off, size_t sz)
+const void *freader_fetch(struct freader *r, loff_t file_off, size_t sz) // freader_fetch
 {
+	/*
+	r : reader 상태(struct freader)
+	file_off : 이번에 읽으려고 하는 시작 오프셋(절대 위치 요청)
+	메모리 모드면 data + file_off
+	파일 모드면 파일 오프셋처럼 취급
+	sz : 읽고 싶은 바이트 수
+
+	성공하면 그 데이터가 있는 메모리 주소 반환
+	실패시 NULL 반환 + r->err에 코드 저장
+	*/
 	size_t folio_sz;
 
 	/* provided internal temporary buffer should be sized correctly */
 	if (WARN_ON(r->buf && sz > r->buf_sz)) {
-		r->err = -E2BIG;
+		/*
+		r->buf : 내부 임시 버퍼 포인터(파일 모드에서 경계 걸치면 복사할 때 사용)
+		-> 존재한다는 건 복사 버퍼를 쓰는 파일 모드일 가능성이 큼
+		r->buf_sz : 그 버퍼의 크기
+		WARN_ON : true면 커널 경고를 한 번 띄우고 true를 반환하는 매크로
+		*/
+		r->err = -E2BIG; // error too big
 		return NULL;
 	}
 
 	if (unlikely(file_off + sz < file_off)) {
-		r->err = -EOVERFLOW;
+	// file_off + sz < file_off 라는 상황은 거의 발생하지 않겠지만 발생한다면 error
+		r->err = -EOVERFLOW; // error overflow
 		return NULL;
 	}
 
 	/* working with memory buffer is much more straightforward */
-	if (!r->buf) {
+	if (!r->buf) { // 메모리 모드
 		if (file_off + sz > r->data_sz) {
 			r->err = -ERANGE;
 			return NULL;
@@ -147,16 +164,38 @@ void freader_cleanup(struct freader *r) // freader_cleanup
 static int parse_build_id(struct freader *r, unsigned char *build_id, __u32 *size,
 			  loff_t note_off, Elf32_Word note_size) // parse_build_id
 {
-	const char note_name[] = "GNU";
-	const size_t note_name_sz = sizeof(note_name);
+	/*
+	메모리 버퍼 모드 : 이미 notes가 메모리에 있음 (r->data, r->data_sz)
+	파일 모드 : 파일에서 notes르 읽어야 함(페이지/folio를 가져오고 매핑)
+	*/
+	const char note_name[] = "GNU"; // 찾고 싶은 note의 name이 GNU인지 확인하기 위한 변수
+	const size_t note_name_sz = sizeof(note_name); // G N U \n 4바이트
 	u32 build_id_off, new_off, note_end, name_sz, desc_sz;
 	const Elf32_Nhdr *nhdr;
 	const char *data;
+	/*
+	note_end : note_off + note_size = note 영역 끝 오프셋
+	name_sz : 현재 note의 n_namesz
+	desc_sz : 현재 note의 n_descz
+	new_off : 다음 note로 넘어갈 오프셋 계산 결과
+	build_id_off : build-id desc 가 시작되는 오프셋
+	nhdr : note 헤더 포인터(가져온 버퍼를 Elf32_Nhdr로 해석)
+	data : desc 바이트들 포인터
+	
+	Elf32_Nhdr(ELF note header 구조체)
+	n_namesz : name 길이
+	n_descsz : desc 길이
+	n_type : note type (build-id 같은 종류 식별)
+	
+	Elf32_Word(ELF에서 쓰는 32-bit unsigned 정수 타입 - u32랑 동일 계열)
+	커널이 64비트여도 note 포맷 자체는 32-bit헤더(Elf32_Nhbr)로 쓰는 경우가 흔함
+	-> note 구조는 대개 32-bit 필드로 고정된 포맷이라서
 
-	if (check_add_overflow(
-		
-		note_off, note_size, &note_end))
-		return -EINVAL;
+	?얘네는 어떤 형태들로 이뤄져 있나?
+	*/
+	
+	if (check_add_overflow(note_off, note_size, &note_end)) // 오버플로우면 true, 아니면 결과를 note_end에 저장
+		return -EINVAL; // 인자가 잘못됐나는 의미의 표준 errno(커널에서 음수로 리턴)
 
 	while (note_end - note_off > sizeof(Elf32_Nhdr) + note_name_sz) {
 		nhdr = freader_fetch(r, note_off, sizeof(Elf32_Nhdr) + note_name_sz);

@@ -74,7 +74,17 @@ void ftrace_likely_update(struct ftrace_likely_data *f, int val,
 
 #else
 # define likely(x)	__builtin_expect(!!(x), 1)
-# define unlikely(x)	__builtin_expect(!!(x), 0)
+# define unlikely(x)	__builtin_expect(!!(x), 0) // unlikely
+/*
+논리 의미는 그냥 x랑 같다. if (unlikely(err))는 if (err)와 결과가 똑같다.
+차이는 성능 최적화용 힌트만 추가된다는 것.
+__builtin_expect(cond, 0)은 cond는 거의 0(false)일 거라고 기대한다는 정보를 컴파일러에 줌
+컴파일러는 이걸 보고:
+err == 0인 경로(정상 경로)를 **핫 패스(hot path)**로 두고,
+err != 0인 에러 경로는 콜드 패스로 빼서
+코드 배치·분기 예측이 더 잘 되도록 정렬한다.
+?에러인게 맞고 정상경로라고 전달?
+*/
 # define likely_notrace(x)	likely(x)
 # define unlikely_notrace(x)	unlikely(x)
 #endif

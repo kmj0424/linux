@@ -991,12 +991,15 @@ void start_kernel(void) //시작
 	init_vmlinux_build_id(); //lib/buildid.c
 	/*
 	지금 실행 중인 커널(vmlinux)의 Build ID를 부팅 초기에 계산해서 전역 배열에 저장
+	?왜 Build ID를 부팅 초기에 계산해서 전역 배열에 저장하는데? 뭘 위해서?
 	vmlinux : vmlinux는 압축되지 않은 커널 이미지를 ELF 형식으로 담고 있는 정적 링크된 실행 파일이라서, 사실상 커널 그 자체
 	커널 이미지 : 커널이 하나의 파일로 디스크에 저장되어 있는 것
 	Build ID란 이 커널 바이너리가 정확히 어떤 빌드 결과물인지 식별하는 지문(fingerprint) 같은 값
 	커널 크래시 로그/스택트레이스 분석
 	커널이 뿌린 주소/심볼이 어떤 vmlinux 디버그 심볼 파일과 맞는지 확인해야 함
 	Build ID가 있으면 이 덤프/로그는 이 vmlinu와 정확히 한 쌍이라는 걸 강하게 보장 가능
+	?build_id = vmlinux_build_id / 결과를 저장할 전역 배열(최대 BUILD_ID_SIZE_MAX 바이트)
+	?여기에 뭐가 들은거야
 
 	kdump(vmcore) 분석
 	vmcore를 crash 툴로 분석할 때도 커널 빌드 식별이 필요하고, vmcoreinfo와 엮여서 분석 정확도를 올림
@@ -1012,6 +1015,23 @@ void start_kernel(void) //시작
 	note 섹션 특징 : 실행 흐름과는 무관, CPU가 실행하지 않음, 툴/커널/디버거가 정보 일기용으로만 사용
 	Build ID는 ELF note 안에 존재
 	Build-id = note 안의 desc 데이터
+	
+	notes 시작 주소
+	│
+	├─ note #1
+	│   ├─ Elf32_Nhdr
+	│   ├─ name ("GNU\0" 등) + padding
+	│   └─ desc (데이터) + padding
+	│
+	├─ note #2
+	│   ├─ Elf32_Nhdr
+	│   ├─ name
+	│   └─ desc
+	│
+	├─ note #3
+	│   ...
+	│
+	└─ notes 끝 주소
 	*/
 	cgroup_init_early();
 	/*
