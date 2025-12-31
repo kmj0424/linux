@@ -37,7 +37,7 @@ static void freader_put_folio(struct freader *r) //freader_put_folio
 	r->folio = NULL;
 }
 
-static int freader_get_folio(struct freader *r, loff_t file_off)
+static int freader_get_folio(struct freader *r, loff_t file_off)ㅜ //freader_get_folio
 {
 	/* check if we can just reuse current folio */
 	if (r->folio && file_off >= r->folio_off &&
@@ -76,37 +76,44 @@ static int freader_get_folio(struct freader *r, loff_t file_off)
 const void *freader_fetch(struct freader *r, loff_t file_off, size_t sz) // freader_fetch
 {
 	/*
-	r : reader 상태(struct freader)
+	r : reader 상태(메모리 모드면 r->data/r->data_sz 사용, 파일 모드면 folio 사용)
 	file_off : 이번에 읽으려고 하는 시작 오프셋(절대 위치 요청)
-	메모리 모드면 data + file_off
-	파일 모드면 파일 오프셋처럼 취급
 	sz : 읽고 싶은 바이트 수
+
+	입력(메모리 버퍼 or 파일)에서 file_Off(입력 시작 기준 오프셋) 위치부터 sz 바이트를 연속된 메모리로 접근하여 포인터를 반환
 
 	성공하면 그 데이터가 있는 메모리 주소 반환
 	실패시 NULL 반환 + r->err에 코드 저장
 	*/
 	size_t folio_sz;
 
-	/* provided internal temporary buffer should be sized correctly */
+	/* provided internal temporary buffer should be sized correctly 
+	제공된 내부 임시 버퍼는 요청 크기를 감당할 수 있을 만큼 충분히 커야 한다 */
 	if (WARN_ON(r->buf && sz > r->buf_sz)) {
 		/*
 		r->buf : 내부 임시 버퍼 포인터(파일 모드에서 경계 걸치면 복사할 때 사용)
 		-> 존재한다는 건 복사 버퍼를 쓰는 파일 모드일 가능성이 큼
-		r->buf_sz : 그 버퍼의 크기
+		r->buf_sz : 그 임시 버퍼의 크기
 		WARN_ON : true면 커널 경고를 한 번 띄우고 true를 반환하는 매크로
+		파일 모드에서는 경계를 넘는 읽기 요청이 오면 r->buf에 복사해서 이어붙임
+		이떄 요청 크기가 버퍼보다 크면 메모리 오버런 위험 -> 에러처리
 		*/
 		r->err = -E2BIG; // error too big
 		return NULL;
 	}
 
-	if (unlikely(file_off + sz < file_off)) {
-	// file_off + sz < file_off 라는 상황은 거의 발생하지 않겠지만 발생한다면 error
-		r->err = -EOVERFLOW; // error overflow
+	if (unlikely(file_off + sz < file_off)) { // 오버플로우 검사
+	/*
+	file_off + sz < file_off 라는 상황은 거의 발생하지 않겠지만 발생한다면 error
+	file_off + sz 계산 중 정수 오버플로우 발생 시 이후 범위 체크가 무의미해짐 -> 에러 처리
+	*/
+	r->err = -EOVERFLOW; // error overflow
 		return NULL;
 	}
 
-	/* working with memory buffer is much more straightforward */
-	if (!r->buf) { // 메모리 모드
+	/* working with memory buffer is much more straightforward
+	메모리 버퍼를 대상으로 작업하는 경우는 훨씬 단순하다 */
+	if (!r->buf) { // 메모리 모드(입력이 이미 메모리에 있는 경우)
 		if (file_off + sz > r->data_sz) {
 			r->err = -ERANGE;
 			return NULL;
@@ -114,7 +121,8 @@ const void *freader_fetch(struct freader *r, loff_t file_off, size_t sz) // frea
 		return r->data + file_off;
 	}
 
-	/* fetch or reuse folio for given file offset */
+	/* fetch or reuse folio for given file offset
+	주어진 파일 오프셋에 해당하는 folio를 가져오거나 재사용한다 */
 	r->err = freader_get_folio(r, file_off);
 	if (r->err)
 		return NULL;
@@ -122,6 +130,9 @@ const void *freader_fetch(struct freader *r, loff_t file_off, size_t sz) // frea
 	/* if requested data is crossing folio boundaries, we have to copy
 	 * everything into our local buffer to keep a simple linear memory
 	 * access interface
+	 * 요청한 데이터가 folio 경계를 넘어가는 경우,
+	 * 단순한 선형 메모리 접근 인터페이스를 유지하기 위해
+	 * 모든 데이터를 로컬 버퍼로 복사해야 한다
 	 */
 	folio_sz = folio_size(r->folio);
 	if (file_off + sz > r->folio_off + folio_sz) {
@@ -144,7 +155,8 @@ const void *freader_fetch(struct freader *r, loff_t file_off, size_t sz) // frea
 		return r->buf;
 	}
 
-	/* if data fits in a single folio, just return direct pointer */
+	/* if data fits in a single folio, just return direct pointer
+	데이터가 하나의 folio 안에 모두 들어가면, 직접 포인터를 반환한다 */
 	return r->addr + (file_off - r->folio_off);
 }
 
@@ -167,6 +179,12 @@ static int parse_build_id(struct freader *r, unsigned char *build_id, __u32 *siz
 	/*
 	메모리 버퍼 모드 : 이미 notes가 메모리에 있음 (r->data, r->data_sz)
 	파일 모드 : 파일에서 notes르 읽어야 함(페이지/folio를 가져오고 매핑)
+
+	r : 입력 읽기 준비된 reader 상태
+	build_id : 결과 저장할 버퍼 주소
+	size : 결과 길이 저장할 곳
+	note_off : 파싱 시작 위치
+	note_size : 파싱할 전체 범위 크기(notes 전체 크기)
 	*/
 	const char note_name[] = "GNU"; // 찾고 싶은 note의 name이 GNU인지 확인하기 위한 변수
 	const size_t note_name_sz = sizeof(note_name); // G N U \n 4바이트
@@ -178,9 +196,9 @@ static int parse_build_id(struct freader *r, unsigned char *build_id, __u32 *siz
 	name_sz : 현재 note의 n_namesz
 	desc_sz : 현재 note의 n_descz
 	new_off : 다음 note로 넘어갈 오프셋 계산 결과
-	build_id_off : build-id desc 가 시작되는 오프셋
+	build_id_off : build-id desc 가 시작되는 오프셋 / build-id 데이터 위치 계산값
 	nhdr : note 헤더 포인터(가져온 버퍼를 Elf32_Nhdr로 해석)
-	data : desc 바이트들 포인터
+	data : desc 바이트들 포인터 / 실제 build-id 데이터 포인터
 	
 	Elf32_Nhdr(ELF note header 구조체)
 	n_namesz : name 길이
@@ -190,20 +208,19 @@ static int parse_build_id(struct freader *r, unsigned char *build_id, __u32 *siz
 	Elf32_Word(ELF에서 쓰는 32-bit unsigned 정수 타입 - u32랑 동일 계열)
 	커널이 64비트여도 note 포맷 자체는 32-bit헤더(Elf32_Nhbr)로 쓰는 경우가 흔함
 	-> note 구조는 대개 32-bit 필드로 고정된 포맷이라서
-
-	?얘네는 어떤 형태들로 이뤄져 있나?
 	*/
 	
 	if (check_add_overflow(note_off, note_size, &note_end)) // 오버플로우면 true, 아니면 결과를 note_end에 저장
 		return -EINVAL; // 인자가 잘못됐나는 의미의 표준 errno(커널에서 음수로 리턴)
 
 	while (note_end - note_off > sizeof(Elf32_Nhdr) + note_name_sz) {
-		nhdr = freader_fetch(r, note_off, sizeof(Elf32_Nhdr) + note_name_sz);
+		nhdr = freader_fetch(r, note_off, sizeof(Elf32_Nhdr) + note_name_sz); // 현재 note의 헤더 읽기
 		if (!nhdr)
 			return r->err;
 
-		name_sz = READ_ONCE(nhdr->n_namesz);
-		desc_sz = READ_ONCE(nhdr->n_descsz);
+		name_sz = READ_ONCE(nhdr->n_namesz); // note가 실제로 가진 name 길이
+		desc_sz = READ_ONCE(nhdr->n_descsz); // note가 가진 데이터 길이
+		// ?READ_ONCE
 
 		new_off = note_off + sizeof(Elf32_Nhdr);
 		if (check_add_overflow(new_off, ALIGN(name_sz, 4), &new_off) ||
@@ -410,7 +427,7 @@ unsigned char vmlinux_build_id[BUILD_ID_SIZE_MAX] __ro_after_init;
 /*
 CONFIG_STACKTRACE_BUILD_ID : 커널이 스택 트레이스 출력할 떄 Build ID 정보를 함께 활용할 수 있게 하는 옵션
 ->크래시 로그를 분석할 때, 이 스택 트레이스가 정확히 어떤 vmlinux와 매칭되는지를 Build ID로 확인 가능
-?스택 트레이스
+스택 트레이스 : 호출 경로 스택
 
 CONFIG_VMCORE_INFO : kdump 같은 크래시 덤프(vmcore) 분석을 위해 커널 메모리 덤프에 필요한 메타 정보(vmcoreinfo)를 제공하는 옵션
 vmcore 분석에서도 어떤 커널 빌드냐가 중요해서 Build ID가 유용함
@@ -426,7 +443,7 @@ BUILD_ID_SIZE_MAX : Build ID가 어떤 길이든 담을 수 있게 최대 크기
 Build ID는 길이가 고정이 아닐 수 있는데(노트 형식/해시 종류에 따라) 커널에서는 최대 길이를 상수로 잡아서 그만큼 버퍼를 확보함
 
 __ro_after_init : init 끝난 뒤에 read-only로 만들겠다는 어트리뷰트
-?어트리뷰트가 뭔데
+?어트리뷰트
 이 값은 부팅때 한 번 계산해서 저장하면 끝이라서, 이후엔 수정될 이유가 없음
 이후에 읽기 전용으로 바꾸면 버그나 공격으로 값이 변조될 가능성이 줄어듦
 -> init 코드에서만 채워지고 init이후에는 커널이 이 메모리를 쓰기 금지로 보호할 수 있음(커널의 rodata보호 메커니즘과 연결)
