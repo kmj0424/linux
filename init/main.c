@@ -1033,6 +1033,18 @@ void start_kernel(void) //시작
 	│   ...
 	│
 	└─ notes 끝 주소
+
+	init_vmlinux_build_id()가 호출되는 시점은 커닐 부팅 중
+	자기 자신(vmlinux)을 이미 메모리 로드해서 실행 중인 상태
+	notes 섹션은 커널 바이너리(vmlinux)의 일부 섹션
+	-> notes 섹션은 이미 커널 메모리 안에 존재함
+	커널 링커 스크립트가 자동으로 만들어주는 심볼인 __start_notes, __stop_notes
+	커널 링크 단계 : 여러 개의 컴파일된 결과물(.o)을 하나의 실행 파일(vmlinux)로 합치는 단계
+	링커가 vmlinux를 만들면서 .text, .data, .notes 같은 섹션을 배치하고
+	__start_notes,__stop_notes 같은 주소 심볼 확정
+	부팅 시 그 주소가 메모리에서 그대로 유지
+	notes 섹션 시작 주소 : __start_notes, notes 섹션 끝 주소 : __stop_notes
+	
 	*/
 	cgroup_init_early();
 	/*

@@ -39,6 +39,8 @@ static void freader_put_folio(struct freader *r) //freader_put_folio
 
 static int freader_get_folio(struct freader *r, loff_t file_off)ㅜ //freader_get_folio
 {
+	/* 파일에서 file_off 오프셋을 읽기 위해, 그 오프셋이 포함된 folio를 페이지 캐시에서
+	가져오고(필요 시에 읽어오고), folio를 매핑해 r->addr로 접근 가능하게 만든다 */
 	/* check if we can just reuse current folio */
 	if (r->folio && file_off >= r->folio_off &&
 	    file_off < r->folio_off + folio_size(r->folio))
@@ -134,22 +136,50 @@ const void *freader_fetch(struct freader *r, loff_t file_off, size_t sz) // frea
 	 * 단순한 선형 메모리 접근 인터페이스를 유지하기 위해
 	 * 모든 데이터를 로컬 버퍼로 복사해야 한다
 	 */
-	folio_sz = folio_size(r->folio);
+	folio_sz = folio_size(r->folio); // 현재 folio가 커버하는 파일 범위가 어디까지인지
 	if (file_off + sz > r->folio_off + folio_sz) {
+	/*
+	r->folio_off : 현재 folio가 파일에서 시작하는 오프셋
+	folio_sz : 현재 folio의 바이트 크기
+	file_off + sz : 내가 읽고 싶은 요청의 끝
+	요청 끝이 현재 folio 끝을 넘어간다 -> 경계 넘음
+	*/
 		u64 part_sz = r->folio_off + folio_sz - file_off, off;
-
-		memcpy(r->buf, r->addr + file_off - r->folio_off, part_sz);
-		off = part_sz;
+		/*
+		현재 folio 끝 오프셋: r->folio_off + folio_sz
+		요청 시작 오프셋: file_off
+		둘의 차이 = 요청 시작부터 folio 끝까지 남은 바이트 수
+		part_sz : 요청한 데이터 중에서 현재 folio 안에 들어있는 부분의 길이
+		*/
+		memcpy(r->buf, r->addr + file_off - r->folio_off, part_sz); // 현재 folio를 r->buf로 복사
+		off = part_sz; // 지금까지 채운 길이
 
 		while (off < sz) {
-			/* fetch next folio */
+			/* fetch next folio 
+			첫 folio에서 가능한 만큼(part_sz) 복사해둔 뒤, 남은(sz-off) 만큼을 다음 folio들에서 계속 이어붙이는 루프 */
 			r->err = freader_get_folio(r, r->folio_off + folio_sz);
+			/*
+			r->folio_off는 현재 folio의 파일 시작 오프셋
+			folio_sz는 현재 folio 크기
+			r->folio_off + folio_sz는 현재 folio의 끝(= 다음 folio의 시작 오프셋)
+			freader_get_folio()가 내부 상태를 갱신
+			r->folio_off → 새 folio의 시작 오프셋으로 바뀜
+			r->addr → 새 folio의 메모리 시작 주소로 바뀜
+			r->folio → 새 folio 객체로 바뀜
+			*/
 			if (r->err)
 				return NULL;
-			folio_sz = folio_size(r->folio);
+			folio_sz = folio_size(r->folio); // 새 folio 크기 갱신
 			part_sz = min_t(u64, sz - off, folio_sz);
-			memcpy(r->buf + off, r->addr, part_sz);
-			off += part_sz;
+			/*
+			이번 folio에서 복사할 크기(part_sz) 결정
+			sz - off : 아직 남은 요청 바이트 수
+			folio_sz : 이번 folio 전체 크기
+			그 둘 중 작은 값을 복사
+			min_t(u64, ...)는 타입 안전하게 최소값 구하는 커널 매크로
+			*/
+			memcpy(r->buf + off, r->addr, part_sz); // 새 folio의 앞부분부터 r->buf 뒤에 이어붙임
+			off += part_sz; // 채운 길이 갱신
 		}
 
 		return r->buf;
@@ -178,21 +208,25 @@ static int parse_build_id(struct freader *r, unsigned char *build_id, __u32 *siz
 {
 	/*
 	메모리 버퍼 모드 : 이미 notes가 메모리에 있음 (r->data, r->data_sz)
-	파일 모드 : 파일에서 notes르 읽어야 함(페이지/folio를 가져오고 매핑)
+	파일 모드 : 파일에서 notes를 읽어야 함(페이지/folio를 가져오고 매핑)
+	freader_fetch()가 내부적으로 folio 매핑/복사까지 처리
+
+	notes 섹션은 여러 개의 note 엔트리가 연속으로 들어있는 컨테이너
+	이 함수는 그 엔트리들을 순회하며 build-id note를 찾는다.
 
 	r : 입력 읽기 준비된 reader 상태
-	build_id : 결과 저장할 버퍼 주소
+	build_id : 결과 저장할 버퍼 주소, vmlinux_build_id[]
 	size : 결과 길이 저장할 곳
-	note_off : 파싱 시작 위치
+	note_off : notes 섹션 안에서의 현재 위치
 	note_size : 파싱할 전체 범위 크기(notes 전체 크기)
 	*/
-	const char note_name[] = "GNU"; // 찾고 싶은 note의 name이 GNU인지 확인하기 위한 변수
-	const size_t note_name_sz = sizeof(note_name); // G N U \n 4바이트
+	const char note_name[] = "GNU"; // note name : GNU에서 type=BUILD_ID인 note를 찾기 위함
+	const size_t note_name_sz = sizeof(note_name); // G N U \0 4바이트
 	u32 build_id_off, new_off, note_end, name_sz, desc_sz;
 	const Elf32_Nhdr *nhdr;
 	const char *data;
 	/*
-	note_end : note_off + note_size = note 영역 끝 오프셋
+	note_end : notes 섹션 끝
 	name_sz : 현재 note의 n_namesz
 	desc_sz : 현재 note의 n_descz
 	new_off : 다음 note로 넘어갈 오프셋 계산 결과
@@ -206,7 +240,7 @@ static int parse_build_id(struct freader *r, unsigned char *build_id, __u32 *siz
 	n_type : note type (build-id 같은 종류 식별)
 	
 	Elf32_Word(ELF에서 쓰는 32-bit unsigned 정수 타입 - u32랑 동일 계열)
-	커널이 64비트여도 note 포맷 자체는 32-bit헤더(Elf32_Nhbr)로 쓰는 경우가 흔함
+	64비트 ELF에서도 Nhdr 자체는 동일한 구조(32-bit 필드)를 쓴다
 	-> note 구조는 대개 32-bit 필드로 고정된 포맷이라서
 	*/
 	
@@ -214,6 +248,20 @@ static int parse_build_id(struct freader *r, unsigned char *build_id, __u32 *siz
 		return -EINVAL; // 인자가 잘못됐나는 의미의 표준 errno(커널에서 음수로 리턴)
 
 	while (note_end - note_off > sizeof(Elf32_Nhdr) + note_name_sz) {
+		/*
+		note 엔트리 안에 Elf32_Nhdr이 있고 name도 있을거고 4바이트보다 작을 순 있겠지만 어쨌든 다 돌겠다는거 아닌가?
+		notes 섹션이 항상 온전하다고 보장 할 수 없음
+		-범위가 잘못 잡히거나 데이터 손상되거나 note_size가 정확하지 않거나 등등
+		그런 경우가 왜 생기는지
+	
+		그래도 돌게 되는 조건 아닌가?
+		note_off부터 note_end까지 남은 바이트가 최소한 헤더 12바이트 + name 4바이트 보다 클 떄만 검사
+		note에 헤더는 12바이트 고정 사이즈
+		name과 desc는 4의 배수여야함 4의 배수가 안되면 패딩으로 채워넣기
+		왜 >= 가 아닌가
+		desc에 들은 값을 어차피 봐야해서 볼려면 16보다 커야하니까 build-id 찾기 위해
+		
+		*/
 		nhdr = freader_fetch(r, note_off, sizeof(Elf32_Nhdr) + note_name_sz); // 현재 note의 헤더 읽기
 		if (!nhdr)
 			return r->err;
@@ -226,6 +274,9 @@ static int parse_build_id(struct freader *r, unsigned char *build_id, __u32 *siz
 		if (check_add_overflow(new_off, ALIGN(name_sz, 4), &new_off) ||
 		    check_add_overflow(new_off, ALIGN(desc_sz, 4), &new_off) ||
 		    new_off > note_end)
+		/*
+		ALIGN(sz, 4) : 길이를 4바이트 경계로 올림해라
+		*/
 			break;
 
 		if (nhdr->n_type == BUILD_ID &&
@@ -423,6 +474,7 @@ int build_id_parse_buf(const void *buf, unsigned char *build_id, u32 buf_size)
 }
 
 #if IS_ENABLED(CONFIG_STACKTRACE_BUILD_ID) || IS_ENABLED(CONFIG_VMCORE_INFO)
+// 스택 트레이스용이든, 크래시 덤프용이든 build-id가 필요한 기능이 하나라도 켜져 있으면 아래 변수를 만든다
 unsigned char vmlinux_build_id[BUILD_ID_SIZE_MAX] __ro_after_init;
 /*
 CONFIG_STACKTRACE_BUILD_ID : 커널이 스택 트레이스 출력할 떄 Build ID 정보를 함께 활용할 수 있게 하는 옵션
@@ -435,15 +487,13 @@ vmcore 분석에서도 어떤 커널 빌드냐가 중요해서 Build ID가 유�
 IS_ENABLED(x) : 옵션이 y로 빌트인(y)이거나, 경우에 따라 모듈(m)로 활성화되었는지를 C 전처리 단계에서 안전하게 판정하려고 쓰는 매크로
 
 vmlinux_build_id : 커널(vmlinux)의 Build ID 바이트들을 저장해두는 버퍼
-unsigned char[]인 이유 : Build ID는 문자열이 아니라 바이너리 바이트 시퀸스
+unsigned char[]인 이유 : Build ID는 문자열이 아니라 바이너리 바이트 시퀸스, 바이트를 저장하는 배열
 바이너리 바이트 시퀸스 : 컴퓨터가 데이터를 처리하는 기본 단위인 0과 1로 이루어진 바이트들이 순서대로 나열된 형태
-?바이트를 저장하는데 왜 unsigned char인가?
 
 BUILD_ID_SIZE_MAX : Build ID가 어떤 길이든 담을 수 있게 최대 크기로 만들어둔 배열
 Build ID는 길이가 고정이 아닐 수 있는데(노트 형식/해시 종류에 따라) 커널에서는 최대 길이를 상수로 잡아서 그만큼 버퍼를 확보함
 
-__ro_after_init : init 끝난 뒤에 read-only로 만들겠다는 어트리뷰트
-?어트리뷰트
+__ro_after_init : init 끝난 뒤에 read-only로 취급
 이 값은 부팅때 한 번 계산해서 저장하면 끝이라서, 이후엔 수정될 이유가 없음
 이후에 읽기 전용으로 바꾸면 버그나 공격으로 값이 변조될 가능성이 줄어듦
 -> init 코드에서만 채워지고 init이후에는 커널이 이 메모리를 쓰기 금지로 보호할 수 있음(커널의 rodata보호 메커니즘과 연결)

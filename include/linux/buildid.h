@@ -86,7 +86,7 @@ struct freader { //freader
 		(1)folio 확보/로딩 -> (2)folio를 커널 매핑 -> (3)add로 읽기 -> (4)unmap/put
 
 		loff_t folio_off;
-		folio가 커버하는 범위 중에서 우리가 관심 있는 시작 오프셋 또는 파일 오프셋 성격
+		folio가 커버하는 범위 중에서 우리가 보려는 시작 오프셋
 		loff_t는 커널에서 파일 오프셋에 쓰는 타입
 
 		bool may_fault;

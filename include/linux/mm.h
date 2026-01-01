@@ -2165,6 +2165,13 @@ static inline unsigned int folio_shift(const struct folio *folio)
 static inline size_t folio_size(const struct folio *folio)
 {
 	return PAGE_SIZE << folio_order(folio);
+	/*
+	PAGE_SIZE = 기본 페이지 크기 (대부분 4KB, 아키텍처/설정에 따라 다를 수 있음)
+	folio_order(folio) = 이 folio가 몇 개의 연속된 페이지를 묶은 건지를 order로 표현한 값
+	order : 페이지를 몇 개나 연속으로 묶었는지
+	order = 2ⁿ 개의 연속된 페이지를 의미하는 n
+	PAGE_SIZE * (2 ^ folio_order(folio))
+	*/
 }
 
 /**
