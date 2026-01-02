@@ -1346,12 +1346,18 @@ static inline int __down_write_trylock(struct rw_semaphore *sem)
 /*
  * unlock after reading
  */
-static inline void __up_read(struct rw_semaphore *sem)
+static inline void __up_read(struct rw_semaphore *sem) // __up_read
 {
+	/*
+	읽기 락 하나를 실제로 반환하고, 다음 락 소유자를 진행시킬 수 있게 함
+	*/
 	long tmp;
 
 	DEBUG_RWSEMS_WARN_ON(sem->magic != sem, sem);
+	// sem이 초기화 안 됐거나, 메모리가 깨졌거나, 이미 free된 걸 참조하는 상황을 잡음
 	DEBUG_RWSEMS_WARN_ON(!is_rwsem_reader_owned(sem), sem);
+	/* sem을 read로 잡고 있는 상태가 아니면 버그
+	락을 잡지 않았는데 풀고 있다를 잡는 검사 */
 
 	preempt_disable();
 	rwsem_clear_reader_owned(sem);
@@ -1531,12 +1537,28 @@ static inline bool is_rwsem_reader_owned(struct rw_semaphore *sem)
 /*
  * lock for reading
  */
-void __sched down_read(struct rw_semaphore *sem)
+void __sched down_read(struct rw_semaphore *sem) // down_read
 {
-	might_sleep();
+	/*
+	down_read() : 읽기 잠금 획득 함수
+	__sched : 커널 주석/어노테이션
+	이 함수가 스케줄링(sleep)을 할 수 있는 경로임을 컴파일러/트레이싱/디버그 인프라에 알리는 용도
+	*/
+	might_sleep(); // 잠들면 안 되는 상황이면 경고
 	rwsem_acquire_read(&sem->dep_map, 0, 0, _RET_IP_);
+	/*
+	lockdep(락 의존성 디버깅) 쪽 훅
+	sem->dep_map : lockdep가 이 락을 추적하기 위한 메타데이터
+	_RET_IP_ : 호출한 위치(리턴 주소)를 넘겨서, 나중에 데드락/락 순서 문제를 분석할 때 어디서 잡았는지 기록하는 데 쓰임
+	*/
 
 	LOCK_CONTENDED(sem, __down_read_trylock, __down_read);
+	/*
+	먼저 빠른 경로(fast path) 로 안 막히면 바로 잡기
+	안 되면(경쟁/contended) 느린 경로(slow path) 로 들어가서 대기/큐잉/수면
+	__down_read_trylock : 지금 당장 읽기 락을 잡을 수 있으면 잡고 true/성공
+	__down_read : trylock이 실패한 경우 들어가는 슬로우패스
+	*/
 }
 EXPORT_SYMBOL(down_read);
 
@@ -1627,10 +1649,15 @@ EXPORT_SYMBOL(down_write_trylock);
 /*
  * release a read lock
  */
-void up_read(struct rw_semaphore *sem)
+void up_read(struct rw_semaphore *sem) // up_read
 {
 	rwsem_release(&sem->dep_map, _RET_IP_);
-	__up_read(sem);
+	/*
+	lockdep(락 의존성 디버깅)용 해제 알림
+	&sem->dep_map : 이 rw_semaphore에 대한 lockdep 메타데이터
+	_RET_IP_ : 이 up_read()를 호출한 호출 위치 주소 / 어디서 락 풀었는지 기록용
+	*/
+	__up_read(sem); // 실제 rw_semaphore의 read count를 줄이고 필요하면 대기 중인 writer를 깨우는 역할
 }
 EXPORT_SYMBOL(up_read);
 

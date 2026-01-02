@@ -30,6 +30,10 @@ void freader_init_from_mem(struct freader *r, const char *data, u64 data_sz)
 
 static void freader_put_folio(struct freader *r) //freader_put_folio
 {
+	/*
+	재사용이 안 되는 상황이면 이전 folio의 매핑(r->addr)을 해제하고
+	folio refcount를 내려서(put) 누수 방지해야 함.
+	*/
 	if (!r->folio)
 		return;
 	kunmap_local(r->addr);
@@ -37,29 +41,72 @@ static void freader_put_folio(struct freader *r) //freader_put_folio
 	r->folio = NULL;
 }
 
-static int freader_get_folio(struct freader *r, loff_t file_off)ㅜ //freader_get_folio
+static int freader_get_folio(struct freader *r, loff_t file_off) //freader_get_folio
 {
 	/* 파일에서 file_off 오프셋을 읽기 위해, 그 오프셋이 포함된 folio를 페이지 캐시에서
-	가져오고(필요 시에 읽어오고), folio를 매핑해 r->addr로 접근 가능하게 만든다 */
+	가져오고(필요 시에 읽어오고), folio를 매핑해 r->addr로 접근 가능하게 만든다
+	페이지 캐시에 없으면 디스크에서 읽어와 채운 뒤(uptodate), kmap_local로 매핑
+	r->folio : 현재 선택된 folio 객체
+	r->folio_off : 이 folio가 파일에서 시작하는 오프셋(= folio가 커버하는 시작 위치)
+	r->addr : folio의 내용에 접근 가능한 커널 가상주소(매핑된 주소)
+	성공 시 r에 세팅되는 값:
+	r->folio : file_off가 속한 folio (페이지캐시에서 확보)
+	r->folio_off : 이 folio가 파일에서 시작하는 바이트 오프셋 (folio_pos)
+	r->addr : folio 내용을 직접 읽을 수 있는 커널 가상주소 (kmap_local_folio)
+	folio의 내용을 파일 데이터로 채우고, 그 folio가 유효하다는 상태(uptodate)를 세팅
+	*/
 	/* check if we can just reuse current folio */
 	if (r->folio && file_off >= r->folio_off &&
 	    file_off < r->folio_off + folio_size(r->folio))
+	/*
+	r->folio : 이미 확보된 folio가 존재하고
+	file_off >= r->folio_off : 읽고 싶은 위치가 그 folio의 시작보다 같거나 뒤에 있으며
+	file_off < r->folio_off + folio_size(r->folio) : 읽고 싶은 위치가 그 folio의 끝보다 앞에 있다
+	지금 읽고 싶은 file_off가 이미 확보해 둔 folio가 담당하는 파일 구간 안에 있다면
+	*/
 		return 0;
 
 	freader_put_folio(r);
+	/*
+	r->folio가 없거나(처음이거나) 있더라도 file_off가 현재 folio 범위 밖이라 재사용이 안 되는 상태
+	따라서 기존 folio가 있으면 정리하고 file_off가 속한 새 folio를 준비
+	*/
 
 	/* reject secretmem folios created with memfd_secret() */
-	if (secretmem_mapping(r->file->f_mapping))
+	if (secretmem_mapping(r->file->f_mapping)) // 그냥 리턴 false?
+	/*
+	secretmem_mapping(r->file->f_mapping) : 이 파일 매핑은 memfd_secret()로 만든 secretmem 기반
+	secretmem은 보안 목적상 일반적인 페이지캐시/매핑 경로로 내용을 읽거나 매핑해 접근하는 걸 허용하지 않음
+	*/
 		return -EFAULT;
 
 	r->folio = filemap_get_folio(r->file->f_mapping, file_off >> PAGE_SHIFT);
+	/*
+	r->folio 에 담기는 상태
+	- 이미 캐시에 있고 uptodate인 folio : 바로 읽기 가능
+	- 캐시에 있지만, 아직 uptodate 아님 : 내용 없음 / 불완전
+	- 에러 : 바로 실패 처리
+	*/
 
 	/* if sleeping is allowed, wait for the page, if necessary */
 	if (r->may_fault && (IS_ERR(r->folio) || !folio_test_uptodate(r->folio))) {
-		filemap_invalidate_lock_shared(r->file->f_mapping);
+	/*
+	r->may_fault : 현재 컨텍스트에서 sleep/fault/디스크 IO 대기가 허용되는지 여부
+	IS_ERR(r->folio) : 페이지 캐시에서 folio를 얻는 데 실패하여 r->folio가 ERR_PTR(-errno) 상태인 경우
+	!folio_test_uptodate(r->folio) : folio 포인터는 정상이나, 데이터가 아직 디스크에서 읽혀 신뢰 가능한 최신 상태(uptodate)로 준비되지 않은 경우
+	folio가 없거나/에러이거나/내용이 준비되지 않았고,
+	지금 컨텍스트가 잠들 수 있다면,
+	read_cache_folio()를 통해 실제 IO를 수행해 folio를 uptodate 상태로 만들 기회를 준다.
+	*/
+		filemap_invalidate_lock_shared(r->file->f_mapping); // 이 mapping의 페이지 캐시를 건드릴 공유(shared) 락을 잡는 것
 		r->folio = read_cache_folio(r->file->f_mapping, file_off >> PAGE_SHIFT,
 					    NULL, r->file);
-		filemap_invalidate_unlock_shared(r->file->f_mapping);
+		/*
+		성공: 해당 index(file_off>>PAGE_SHIFT)를 커버하는 struct folio * (페이지캐시 folio)
+        이 경로는 필요 시 디스크 IO까지 해서 folio 내용을 채워(uptodate) 반환하려고 시도함
+		실패: ERR_PTR(-errno) (IS_ERR(r->folio)로 판별)
+		*/
+		filemap_invalidate_unlock_shared(r->file->f_mapping); // shared 락 해제
 	}
 
 	if (IS_ERR(r->folio) || !folio_test_uptodate(r->folio)) {
@@ -190,12 +237,17 @@ const void *freader_fetch(struct freader *r, loff_t file_off, size_t sz) // frea
 	return r->addr + (file_off - r->folio_off);
 }
 
-void freader_cleanup(struct freader *r) // freader_cleanup
+void freader_cleanup(struct freader *r) // freader_cleanup 마지막으로 잡고 있던 folio가 남아 있으면 깨끗이 풀고 끝내라
 {
-	if (!r->buf)
-		return; /* non-file-backed mode */
+	if (!r->buf) // 메모리 모드
+		return; /* non-file-backed mode */ // folio 매핑 같은 게 없으니 정리할 게 없음
 
 	freader_put_folio(r);
+	/*
+	kunmap_local(r->addr) : 매핑 해제
+	folio_put(r->folio) : refcount(참조카운트) 감소
+	r->folio = NULL : 상태 리셋
+	*/
 }
 
 /*
@@ -268,39 +320,47 @@ static int parse_build_id(struct freader *r, unsigned char *build_id, __u32 *siz
 
 		name_sz = READ_ONCE(nhdr->n_namesz); // note가 실제로 가진 name 길이
 		desc_sz = READ_ONCE(nhdr->n_descsz); // note가 가진 데이터 길이
-		// ?READ_ONCE
-
-		new_off = note_off + sizeof(Elf32_Nhdr);
+		/*
+		READ_ONCE : 컴파일러가 값을 한번만 메모리에서 읽도록 강제
+		메모리 맵/동시성/최적화 상황에서 값이 이상하게 보이는 걸 막고 파서가 일관된 값으로 계산하게 하려는 방어적 습관
+		*/
+		new_off = note_off + sizeof(Elf32_Nhdr); // 헤더 건너뛰고 name으로
 		if (check_add_overflow(new_off, ALIGN(name_sz, 4), &new_off) ||
 		    check_add_overflow(new_off, ALIGN(desc_sz, 4), &new_off) ||
 		    new_off > note_end)
 		/*
+		check_add_overflow(new_off, ALIGN(name_sz, 4), &new_off)
+		-name 크기(name_sz)가 정상 범위인지 간접적으로 확인하는 단계
+		check_add_overflow(new_off, ALIGN(desc_sz, 4), &new_off)
+		-name 크기(name_sz)가 정상 범위인지 간접적으로 확인하는 단계
+		new_off > note_end : 계산된 note 전체 크기가 notes 컨테이너 범위를 넘는지 확인
 		ALIGN(sz, 4) : 길이를 4바이트 경계로 올림해라
 		*/
 			break;
 
-		if (nhdr->n_type == BUILD_ID &&
-		    name_sz == note_name_sz &&
-		    memcmp(nhdr + 1, note_name, note_name_sz) == 0 &&
-		    desc_sz > 0 && desc_sz <= BUILD_ID_SIZE_MAX) {
-			build_id_off = note_off + sizeof(Elf32_Nhdr) + ALIGN(note_name_sz, 4);
+		if (nhdr->n_type == BUILD_ID && // note의 타입이 build-id 인지
+		    name_sz == note_name_sz && // note가 가진 name 길이가 우리가 기대하는 길이(4)와 같은지
+		    memcmp(nhdr + 1, note_name, note_name_sz) == 0 && // nhdr + 1은 헤더 바로 뒤, name이 GNU인지 확인
+		    desc_sz > 0 && desc_sz <= BUILD_ID_SIZE_MAX) { // build-id는 실제 데이터(desc)가 있어야 하니까 >0
+			// 결과 버퍼 최대치보다 크면 복사하면 터지니까 상한 검사
+			build_id_off = note_off + sizeof(Elf32_Nhdr) + ALIGN(note_name_sz, 4); // build-id 데이터(desc)가 시작하는 위치 계산
 
 			/* freader_fetch() will invalidate nhdr pointer */
-			data = freader_fetch(r, build_id_off, desc_sz);
+			data = freader_fetch(r, build_id_off, desc_sz); // desc(build-id 바이트) 실제로 읽어오기
 			if (!data)
 				return r->err;
 
-			memcpy(build_id, data, desc_sz);
-			memset(build_id + desc_sz, 0, BUILD_ID_SIZE_MAX - desc_sz);
-			if (size)
-				*size = desc_sz;
+			memcpy(build_id, data, desc_sz); // build_id(= vmlinux_build_id[])에 build-id 바이트를 복사
+			memset(build_id + desc_sz, 0, BUILD_ID_SIZE_MAX - desc_sz); // 남는 부분은 0으로 채워서 항상 고정 크기 배열 형태 유지
+			if (size) // 성공 경로일때, build-id 잘 찾고 모든 검사 통과했을 떄
+				*size = desc_sz; // build_id_len = desc_sz;
 			return 0;
 		}
 
-		note_off = new_off;
+		note_off = new_off; // 다음 note 엔트리 시작으로 이동
 	}
-
-	return -EINVAL;
+	// 범위 안에서 GNU build-id note를 못 찾았거나 중간에 데이터가 이상해서 break로 나왔거나
+	return -EINVAL; // 끝까지 없으면 에러
 }
 
 /* Parse build ID from 32-bit ELF */

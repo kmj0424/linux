@@ -1419,8 +1419,9 @@ static inline __must_check bool try_get_page(struct page *page)
  * Context: May be called in process or interrupt context, but not in NMI
  * context.  May be called while holding a spinlock.
  */
-static inline void folio_put(struct folio *folio)
+static inline void folio_put(struct folio *folio) // folio_put
 {
+	// folio의 참조 카운트(refcount)를 하나 줄이고, 그 결과 0이 되면 실제로 folio를 해제(반납)
 	if (folio_put_testzero(folio))
 		__folio_put(folio);
 }

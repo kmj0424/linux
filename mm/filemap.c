@@ -1926,7 +1926,7 @@ out:
  * Return: The found folio or an ERR_PTR() otherwise.
  */
 struct folio *__filemap_get_folio(struct address_space *mapping, pgoff_t index,
-		fgf_t fgp_flags, gfp_t gfp)
+		fgf_t fgp_flags, gfp_t gfp) // __filemap_get_folio
 {
 	struct folio *folio;
 
@@ -4111,6 +4111,10 @@ out:
 struct folio *read_cache_folio(struct address_space *mapping, pgoff_t index,
 		filler_t filler, struct file *file)
 {
+	/*
+	페이지캐시에 해당 folio가 없거나 uptodate가 아니면
+	실제로 디스크/스토리지에서 읽어서 folio 내용을 채우고(uptodate로 만들고) 반환
+	*/
 	return do_read_cache_folio(mapping, index, filler, file,
 			mapping_gfp_mask(mapping));
 }
