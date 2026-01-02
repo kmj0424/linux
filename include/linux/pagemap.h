@@ -796,6 +796,11 @@ static inline struct folio *write_begin_get_folio(const struct kiocb *iocb,
 static inline struct folio *filemap_get_folio(struct address_space *mapping,
 					pgoff_t index)
 {
+	/*
+	이 파일(mapping)의 페이지캐시에서 index 위치를 커버하는 folio를 찾아서 하나 확보(refcount 증가)해 반환
+	mapping : 이 파일의 페이지 캐시 공간
+	index : 페이지 단위 인덱스
+	*/
 	return __filemap_get_folio(mapping, index, 0, 0);
 }
 

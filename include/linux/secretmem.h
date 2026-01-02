@@ -21,7 +21,7 @@ static inline bool vma_is_secretmem(struct vm_area_struct *vma)
 	return false;
 }
 
-static inline bool secretmem_mapping(struct address_space *mapping)
+static inline bool secretmem_mapping(struct address_space *mapping) // secretmem_mapping
 {
 	return false;
 }

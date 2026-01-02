@@ -1419,8 +1419,9 @@ static inline __must_check bool try_get_page(struct page *page)
  * Context: May be called in process or interrupt context, but not in NMI
  * context.  May be called while holding a spinlock.
  */
-static inline void folio_put(struct folio *folio)
+static inline void folio_put(struct folio *folio) // folio_put
 {
+	// folio의 참조 카운트(refcount)를 하나 줄이고, 그 결과 0이 되면 실제로 folio를 해제(반납)
 	if (folio_put_testzero(folio))
 		__folio_put(folio);
 }
@@ -2165,6 +2166,13 @@ static inline unsigned int folio_shift(const struct folio *folio)
 static inline size_t folio_size(const struct folio *folio)
 {
 	return PAGE_SIZE << folio_order(folio);
+	/*
+	PAGE_SIZE = 기본 페이지 크기 (대부분 4KB, 아키텍처/설정에 따라 다를 수 있음)
+	folio_order(folio) = 이 folio가 몇 개의 연속된 페이지를 묶은 건지를 order로 표현한 값
+	order : 페이지를 몇 개나 연속으로 묶었는지
+	order = 2ⁿ 개의 연속된 페이지를 의미하는 n
+	PAGE_SIZE * (2 ^ folio_order(folio))
+	*/
 }
 
 /**
