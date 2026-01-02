@@ -109,15 +109,20 @@ static int freader_get_folio(struct freader *r, loff_t file_off) //freader_get_f
 		filemap_invalidate_unlock_shared(r->file->f_mapping); // shared 락 해제
 	}
 
-	if (IS_ERR(r->folio) || !folio_test_uptodate(r->folio)) {
-		if (!IS_ERR(r->folio))
-			folio_put(r->folio);
-		r->folio = NULL;
+	if (IS_ERR(r->folio) || !folio_test_uptodate(r->folio)) { // folio를 얻는 데 실패하거나 데이터가 유효하지 않으면
+		if (!IS_ERR(r->folio)) // folio는 얻었는데 데이터가 유효하지 않은 경우
+			folio_put(r->folio); // folio의 참조 카운트(refcount)를 1 감소
+		r->folio = NULL; // 이 reader에는 현재 유효한 folio가 없다는 상태를 명확히 표시
 		return -EFAULT;
 	}
+	/*
+	folio = 여러 개의 page를 묶은 메모리 객체
+	파일 캐시(page cache)에서 데이터 단위로 관리됨
+	참조 카운트(refcount)로 누가 쓰고 있나를 관리
+	*/
 
-	r->folio_off = folio_pos(r->folio);
-	r->addr = kmap_local_folio(r->folio, 0);
+	r->folio_off = folio_pos(r->folio); // folio_pos(r->folio) : 현재 확보한 folio가 파일에서 커버하는 구간의 시작 바이트 오프셋
+	r->addr = kmap_local_folio(r->folio, 0); //kmap_local_folio(r->folio, 0) : folio 내용을 커널 가상주소로 로컬 매핑한 포인터를 얻음
 
 	return 0;
 }

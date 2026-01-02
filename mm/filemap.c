@@ -1928,6 +1928,12 @@ out:
 struct folio *__filemap_get_folio(struct address_space *mapping, pgoff_t index,
 		fgf_t fgp_flags, gfp_t gfp) // __filemap_get_folio
 {
+	/*
+	페이지 캐시에 이미 있으면 그 folio를 가져오고,
+	없으면(플래그가 허용하면) 새 folio를 만들어 캐시에 추가하며,
+	요청된 플래그(FGP_*)에 따라 lock/접근표시/대기 등을 처리한 뒤
+	정상 folio 또는 ERR_PTR를 반환한다.
+	*/
 	struct folio *folio;
 
 repeat:
