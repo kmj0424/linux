@@ -927,7 +927,9 @@ void start_kernel(void) //시작
 
 	set_task_stack_end_magic(&init_task); //init/init_task.c kernel/fork.c
 	/*
-	디버깅이나 크래시상황에 오버플로우 확인하기 위함 
+	디버깅이나 크래시상황에 오버플로우 확인하기 위함
+
+	
 	*/
 	smp_setup_processor_id(); //arch/arm/kernel/setup.c
 	/*
