@@ -193,7 +193,7 @@ static DEFINE_PER_CPU(struct css_rstat_cpu, root_rstat_cpu);
 static DEFINE_PER_CPU(struct cgroup_rstat_base_cpu, root_rstat_base_cpu);
 
 /* the default hierarchy */
-struct cgroup_root cgrp_dfl_root = {
+struct cgroup_root cgrp_dfl_root = { // cgrp_dfl_root
 	.cgrp.self.rstat_cpu = &root_rstat_cpu,
 	.cgrp.rstat_base_cpu = &root_rstat_base_cpu,
 };
@@ -2132,7 +2132,7 @@ static void init_cgroup_housekeeping(struct cgroup *cgrp)
 	INIT_WORK(&cgrp->release_agent_work, cgroup1_release_agent);
 }
 
-void init_cgroup_root(struct cgroup_fs_context *ctx)
+void init_cgroup_root(struct cgroup_fs_context *ctx) // init_cgroup_root
 {
 	struct cgroup_root *root = ctx->root;
 	struct cgroup *cgrp = &root->cgrp;
@@ -6301,9 +6301,10 @@ static void __init cgroup_init_subsys(struct cgroup_subsys *ss, bool early)
 
 /**
  * cgroup_init_early - cgroup initialization at system boot
- *
+ * cgroup_init_early 는 시스템 부팅 시점에 cgroup을 초기화하는 함수
  * Initialize cgroups at system boot, and initialize any
  * subsystems that request early init.
+ * 부팅할때 cgroup들을 초기화하고, 그 중에서 초기(early) 초기화를 요구하는 서브 시스템들도 함께 초기화
  */
 int __init cgroup_init_early(void) // cgroup_init_early
 {
@@ -6322,6 +6323,7 @@ int __init cgroup_init_early(void) // cgroup_init_early
 		     "invalid cgroup_subsys %d:%s css_alloc=%p css_free=%p id:name=%d:%s\n",
 		     i, cgroup_subsys_name[i], ss->css_alloc, ss->css_free,
 		     ss->id, ss->name);
+		// 서브시스템 이름 길이가 최대 허용 길이 넘으면 경고
 		WARN(strlen(cgroup_subsys_name[i]) > MAX_CGROUP_TYPE_NAMELEN,
 		     "cgroup_subsys_name %s too long\n", cgroup_subsys_name[i]);
 		WARN(ss->early_init && ss->css_rstat_flush,

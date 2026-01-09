@@ -42,7 +42,7 @@ extern void __init enable_debug_cgroup(void);
 /*
  * The cgroup filesystem superblock creation/mount context.
  */
-struct cgroup_fs_context {
+struct cgroup_fs_context { // cgroup_fs_context
 	struct kernfs_fs_context kfc;
 	struct cgroup_root	*root;
 	struct cgroup_namespace	*ns;
