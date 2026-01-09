@@ -925,11 +925,76 @@ void start_kernel(void) //시작
 	char *command_line;
 	char *after_dashes;
 
-	set_task_stack_end_magic(&init_task); //init/init_task.c kernel/fork.c
 	/*
-	디버깅이나 크래시상황에 오버플로우 확인하기 위함 
+	커널은 하나지만 태스크마다 독립적인 커널 스택을 가짐
+	스택·힙·데이터가 한 덩어리로 구성되는 것은 사용자 프로세스 주소 공간의 개념
+	커널 주소 공간은 모든 태스크가 공유하는 전역 공간
+	태스크별 커널 스택은 전역 메모리 풀에서 따로 할당될 뿐 태스크의 다른 구성요소들과 물리적으로 묶여 있지 않음
+	커널은 CPU의 MMU 동작 방식에 맞추기 위해 메모리를 페이지 단위로 관리하며, 커널 스택 역시 예외 없이 페이지 단위로 할당
+	set_task_stack_end_magic(&init_task)가 호출되는 시점은 커널 부팅 초기에 이미 존재하는 유일한 태스크인 init_task가
+	자신의 커널 스택을 사용 중인 상태에서 아직 일반적인 태스크 생성 메커니즘이 시작되기 전에
+	task란 커널이 관리하는 실행 단위(execution context)이며 CPU에서 실행될 수 있는 최소 단위
+
+	리눅스 커널에서 task는 CPU에서 실행될 수 있는 최소 실행 단위로
+	프로세스와 스레드를 구분하지 않고 모두 task_struct로 관리
+	task_struct는 스케줄링, 상태, 메모리, 부모-자식 관계 등 실행에 필요한 모든 정보를 담고 있음
+	각 task는 커널 모드 실행을 위해 반드시 독립적인 커널 스택을 하나씩 가짐
+	일반적인 task는 실행 중 copy_process를 통해 동적으로 생성
+	이 과정에서 PID가 부여되고 커널 스택과 그 끝에 대한 보호(magic 값 설정)가 자동으로 이루어짐
+	반면 init_task는 커널 부팅을 가능하게 하기 위해 커널 이미지에 정적으로 정의된 최초의 task(PID 0)
+	일반 생성 경로를 거치지 않기 때문에 커널 스택 보호 역시 예외적으로 수동 설정
+	이후 init_task는 PID 1을 생성하고 ID 1은 부모를 잃은 프로세스의 최종 부모로서 좀비 프로세스를 회수하는 역할을 수행
+
+	함수의 목적
+	set_task_stack_end_magic() 함수의 목적은 각 태스크가 커널 모드에서 사용하는 커널 스택의 끝(바닥)에 magic 값을 기록하여
+	커널 스택이 할당된 범위를 침범했는지를 이후 검사 시점에 감지할 수 있도록 하는 것
+	이 함수 자체가 오버플로우를 검사하는 것은 아니며, 검사를 가능하게 하는 표식(magic 값)을 설치하는 역할
+
+	커널 메모리와 페이지(Page) 단위 관리
+	리눅스 커널은 메모리를 바이트 단위가 아니라 페이지(page) 단위로 관리
+	페이지는 CPU의 MMU(메모리 관리 장치)가 이해하는 최소 관리 단위로 일반적으로 4KB 크기
+	커널은 페이지 단위로 메모리를 할당·해제하고, 접근 권한이나 매핑 역시 페이지 단위로 설정
+	이러한 설계는 하드웨어 구조에 맞춘 것, 메모리 보호와 성능을 동시에 고려한 결과
+
+	커널 스택과 페이지 단위 할당
+	각 태스크(task)는 커널 모드에서 실행될 때 사용할 전용 커널 스택을 반드시 하나씩 가짐
+	이 커널 스택은 힙처럼 가변 크기가 아니라, 고정된 크기(THREAD_SIZE)의 연속된 페이지들로 할당
+	커널 스택 크기가 8KB -> 4KB 페이지 두 개가 연속된 가상 주소 공간으로 할당된 것
+	커널 스택이 페이지 단위로 연속 할당되는 이유는 주소 계산을 단순하게 하고, 인터럽트나 예외 상황에서도 안전하게 접근할 수 있도록 하기 위함
+
+	스택 성장 방향과 페이지 경계 문제
+	커널 스택은 아래 방향(낮은 주소 방향)으로 성장, 함수 호출이 깊어질수록 스택 포인터는 점점 낮은 주소로 이동
+	만약 스택 사용량이 커널 스택에 할당된 페이지 범위를 넘어가면, 스택은 더 낮은 주소의 다른 커널 메모리 페이지를 침범하게 됨
+	이 페이지는 다른 태스크의 커널 스택일 수도 있고, task_struct나 다른 커널 자료구조가 들어 있는 페이지일 수도 있음
+
+	커널 스택 오버플로우가 치명적인 이유
+	커널 주소 공간은 모든 태스크가 공유하며, 사용자 공간처럼 강력한 보호 장치가 적용 x
+	따라서 커널 스택이 페이지 경계를 넘어 다른 커널 메모리 페이지를 덮어쓰면, 단순히 해당 태스크만 문제가 되는 것이 아니라 시스템 전체의 무결성이 깨짐
+	이런 손상은 즉시 오류를 발생시키지 않고, 나중에 알 수 없는 시점에서 커널 패닉이나 데이터 손상으로 나타날 수 있기 때문에 매우 위험
+
+	guard page 방식과 커널에서의 한계
+	사용자 공간에서는 스택의 끝에 접근 불가능한 페이지를 하나 두는 guard page 방식을 사용해 스택 오버플로우를 감지
+	이 방식은 스택이 해당 페이지에 접근하는 순간 페이지 폴트를 발생시켜 즉시 오류를 알림
+	커널 모드는 인터럽트나 예외 처리 중에는 페이지 폴트 자체가 치명적일 수 있으며, 처리 불가능한 상황으로 이어질 수 있음
+	따라서 커널 스택에는 guard page 방식이 일반적으로 사용되지 않고 커널은 예외를 발생시키지 않는 방식으로 스택의 끝에 미리 magic 값을 기록해 두고 이를 비교하는 방식을 선택
+
+	end_of_stack(task)의 의미와 계산 방식
+	커널은 각 태스크의 커널 스택이 차지하는 페이지 범위를 정확히 알고 있기 때문에, 스택의 끝 주소를 계산할 수 있음
+	end_of_stack(task)는 해당 태스크의 커널 스택 시작 주소(task->stack)에 스택 크기(THREAD_SIZE)를 더하고 그 태스크가 사용할 수 있는 커널 스택의 최하단 주소를 산출
+	이 주소는 페이지 경계 기준으로 계산된 절대 침범해서는 안 되는 스택의 경계 지점
+
+	magic 값(STACK_END_MAGIC)과 페이지 침범 감지
+	set_task_stack_end_magic() 함수는 end_of_stack(task)로 계산된 커널 스택의 끝 위치에 STACK_END_MAGIC이라는 고정된 값을 기록
+	이 값은 정상적인 실행 중에는 절대로 변경되지 않아야 함
+	만약 커널 스택이 할당된 페이지 범위를 넘어 다른 페이지로 침범하게 되면
+	이 magic 값이 덮어써지게 되고, 커널은 이후 검사 과정에서 이를 감지해 스택 오버플로우 발생 사실을 알 수 있음
+
+	init_task와 예외적인 수동 호출
+	init_task는 커널 부팅 시점에 이미 정적으로 존재하는 최초의 태스크(PID 0)로 일반적인 태스크 생성 경로를 거치지 않음
+	일반 태스크들은 생성 과정에서 커널 스택이 페이지 단위로 할당될 때 자동으로 set_task_stack_end_magic()가 호출지만 init_task는 이러한 자동 경로를 타지 않음
+	그래서 커널 부팅 초기에 예외적으로 set_task_stack_end_magic(&init_task)를 호출해 커널 스택 끝 페이지에 magic 값을 설정한다.
 	*/
-	smp_setup_processor_id(); //arch/arm/kernel/setup.c
+	set_task_stack_end_magic(&init_task); //init/init_task.c kernel/fork.c
 	/*
 	지금 코드를 실행중인 CPU processor id 확정
 	cpu processor id -> cpu siblings -> 소켓
@@ -973,8 +1038,64 @@ void start_kernel(void) //시작
 	?APIC 레지스터
 	?비트마스킹 : 정수의 이진수 표현을 자료구조로 쓰는 기법
 	?apic
+
+	하드웨어 CPU ID 읽기 (MPIDR)
+	부트 CPU의 logical id = 0으로 매핑
+	부트 CPU의 percpu 오프셋을 0으로 확정(초기 hang 방지)
+
+	SMP란 무엇인가
+	SMP(Symmetric Multi-Processing)는 여러 개의 CPU가 동등한 권한으로 하나의 커널을 공유하며 실행되는 구조를 의미
+	SMP 환경에서는 모든 CPU가 동일한 커널 코드를 실행할 수 있고, 인터럽트 처리, 시스템 콜 처리, 스케줄링에 모두 참여 가능
+	CPU마다 다른 커널을 실행하는 구조가 아니라, 커널은 하나이고 실행 주체(CPU)만 여러 개인 구조
+	반대로 단일 CPU(UP, Uni-Processor) 환경에서는 CPU가 하나뿐이기 때문에 현재 실행 중인 CPU가 누구인가라는 문제 자체가 발생하지 않음
+	이 경우 커널은 CPU 식별, CPU 간 동기화, CPU 간 인터럽트(IPI) 같은 SMP 관련 복잡성을 대부분 제거하거나 단순화할 수 있음
+
+	함수의 목적
+	smp_setup_processor_id()의 목적은 커널 부팅 극초반에 현재 실행 중인 CPU가 누구인지를 커널 내부 기준으로 확정하는 것
+	SMP 커널에서는 여러 CPU가 동시에 커널 코드를 실행할 수 있기 때문에, 커널은 반드시 지금 이 코드가 어느 CPU에서 실행되고 있는지를 알아야 함
+	이를 위해 커널은 CPU를 내부적으로 logical CPU ID(0, 1, 2, …)로 관리하며, smp_setup_processor_id()는 부팅을 시작한 CPU를 logical CPU 0으로 고정하는 역할을 수행
+	이 결정은 이후 스케줄링, per-CPU 데이터, CPU 마스크 초기화 전반의 기준점이 됨
+
+	커널이 CPU를 다루는 방식 (physical CPU vs logical CPU)
+	하드웨어는 각 CPU를 물리적 식별자(physical CPU ID)로 구분.
+	이 식별자는 아키텍처 의존적이며, arm64에서는 MPIDR 레지스터의 affinity 필드들이 CPU의 물리적 위치와 정체를 나타냄.
+	반면 리눅스 커널은 CPU를 logical CPU ID라는 추상화된 번호 체계로 관리.
+	커널은 이 CPU가 소켓 몇 번, 코어 몇 번인가보다는, 이 CPU가 logical CPU 0인가, 1인가에만 관심을 가짐.
+	따라서 SMP 커널이 동작하려면, physical CPU ID → logical CPU ID로의 매핑이 반드시 필요하며, smp_setup_processor_id()는 이 매핑의 첫 단계를 담당.
+
+	단일 CPU(UP) 커널과 SMP 커널의 차이
+	리눅스 커널은 설정에 따라 단일 CPU 커널로도, SMP 커널로도 빌드될 수 있음.
+	단일 CPU 커널에서는 CPU가 하나뿐이므로, CPU 식별 과정이 사실상 불필요.
+	SMP 커널에서는 여러 CPU가 존재할 수 있으므로, 반드시 CPU 식별과 매핑 과정이 필요.	
+	이 차이를 코드 레벨에서 처리하기 위해 커널에는 is_smp()와 같은 조건 분기들이 존재.
+	is_smp()는 현재 커널이 SMP 환경으로 동작 중인지 여부를 반환하며, 단일 CPU 커널이거나 SMP가 비활성화된 경우에는 false를 반환.
+	이를 통해 커널은 CPU가 여러 개일 가능성이 있는 경우에만 하드웨어 CPU ID를 읽거나, SMP 전용 초기화 코드를 실행하도록 분기.
+
+	smp_setup_processor_id() 내부의 조건 분기 의미
+	SMP 환경일 경우 → 현재 CPU의 하드웨어 식별자(예: MPIDR)를 읽어와 logical CPU 0에 매핑.
+	SMP가 아닌 경우(단일 CPU) → 하드웨어 CPU ID를 읽을 필요가 없으므로, CPU ID를 0으로 간주.
+	이 분기는 SMP 커널이지만 실제로는 CPU가 하나뿐인 경우나, 아예 단일 CPU 커널로 빌드된 경우 모두를 포괄하기 위한 장치.
+	커널은 불필요한 하드웨어 레지스터 접근을 피하고, 단일 CPU 환경에서는 CPU 0 하나만 존재한다고 가정해 초기화를 단순화.
+
+	부트 CPU를 logical CPU 0으로 고정하는 이유
+	smp_setup_processor_id()는 현재 실행 중인 CPU를 항상 logical CPU 0으로 고정.
+	이는 이후 커널 초기화 코드 전반이 부트 CPU = CPU 0이라는 가정 위에서 작성되어 있기 때문.
+	예를 들어 초기 스케줄링, CPU 마스크 구성, per-CPU 데이터 초기화, 디버그 코드들은 CPU 0이 이미 존재하고 실행 중이라는 전제를 사용.
+	이 함수는 이 전제를 코드 차원에서 확정짓는 역할을 하며, 이후 다른 CPU들은 secondary CPU로 취급되어 별도의 초기화 경로를 탐.
+
+	per-CPU 변수와 초기 오프셋 설정
+	per-CPU 변수는 CPU마다 독립적인 값을 가지는 커널 데이터.
+	내부적으로는 per-CPU 베이스 주소 + CPU별 오프셋 방식으로 접근.
+	커널 부팅 극초반에는 per-CPU 메모리 영역이 아직 완전히 구성되지 않았지만, 이후 실행되는 디버그 코드나 초기화 루틴 일부는 per-CPU 변수를 참조 가능.
+	이를 안전하게 처리하기 위해 smp_setup_processor_id()는 부트 CPU의 per-CPU 오프셋을 0으로 설정하여, 현재는 CPU 0만 존재한다는 가정 하에 안정적인 접근이 가능하도록 만든다.
+
+	SMP 전체 초기화 과정에서의 위치
+	중요한 점은 smp_setup_processor_id()가 SMP 환경을 완성하는 함수는 아님.
+	이 함수는 다른 CPU를 깨우지 않으며, 다중 CPU 스케줄링을 시작하지도 않음.
+	대신 이 함수는 SMP 초기화가 가능해지기 위한 최소한의 전제 조건만을 마련.
+	이후 커널은 디바이스 트리나 ACPI를 통해 시스템에 존재하는 모든 CPU를 탐색하고, 각 CPU를 logical ID에 매핑한 뒤, 펌웨어를 통해 secondary CPU들을 기동하여 완전한 SMP 환경으로 진입.
 	*/
-	debug_objects_early_init();
+	smp_setup_processor_id(); //arch/arm/kernel/setup.c
 	/*
 	커널의 디버그 오브젝트 추적 서브 시스템을 초기에 켜는 작업
 	디버그오브젝트도 smp처럼 의미가 있는 것인가?
@@ -987,8 +1108,57 @@ void start_kernel(void) //시작
 	이미 해제된 객체 재사용
 	double init(두번 초기화) / double free(두번 할당 해제)
 	대표적으로 감시하는 객체들 : timers / workqueues / rcu head / completion / perf events 등
+
+	어떤 커널 객체들의 생명주기를 체크해서 이중 초기화나 이중 해제 같은 문제를 해결하는 debugobjects 서브 시스템이 부팅 초반에도 그 검사를 할 수 있도록 해시테이블 락과 정적 메타 데이터 풀을 준비하는 함수.
+
+	early boot 환경이란
+	early boot는 커널이 실행되기 시작했지만, 아직 커널의 핵심 인프라가 완전히 준비되지 않은 상태
+	동적 메모리 할당(kmalloc, slab allocator)을 신뢰할 수 없음
+	스케줄러 미동작 (sleep, block 불가)
+	lockdep(락 디버깅) 미초기화
+	인터럽트/IRQ 관리가 제한적
+	SMP 환경 미완성 (부트 CPU만 동작)
+
+	debugobjects란
+	debugobjects는 커널 객체들의 생명주기(init → use → free)를 추적하는 디버깅 서브시스템.
+	타이머, 워크큐, RCU 콜백과 같은 객체들은 명확한 사용 규칙을 가지며,	이 규칙이 어긋나면 커널은 매우 치명적인 버그에 빠질 수 있다.
+	debugobjects는 이중 초기화,	이중 해제, 해제된 객체 재사용, 잘못된 상태 전이 등을 감지한다.
+	이를 위해 debugobjects는 실제 객체를 수정하지 않고,	해당 객체의 주소를 키로 삼아 추적 메타데이터(debug_obj) 를 별도로 관리.
+
+	추적 메타데이터(debug_obj)
+	debug_obj는 추적 대상 객체의 상태를 기록하는 관리용 구조체.
+	obj_static_pool[] 정적 배열에 담겨있음.
+	추적 대상 객체의 주소, 현재 생명주기 상태, 해당 객체 타입의 규칙, 리스트 연결용 hlist_node 등을 가짐
+
+	해시 테이블(obj_hash[])
+	debugobjects는 객체 주소를 빠르게 찾기 위해 해시 테이블을 사용.
+	객체 주소 → 해시 함수 → 버킷 인덱스
+	각 버킷은 raw_spinlock, hlist_head를 가짐
+	버킷 안의 hlist에는 현재 추적 중인 객체들의 debug_obj 메타데이터가 연결되어 있다.
+	해시 테이블을 사용함으로써, debugobjects는 평균적으로 O(1) 시간에 객체 상태를 조회할 수 있다.
+
+	왜 버킷마다 락이 필요한가
+	객체 등록, 상태 검사, 해제 과정에서 버킷의 hlist는 수정되는데 이 작업은 인터럽트 컨텍스트나 다른 CPU 경로에서도 동시에 발생할 수 있음
+	동기화 없이 접근하면 리스트 구조 손상, 잘못된 debug_obj 참조, 커널 크래시 등의 문제가 생김.
+
+	왜 raw spinlock을 사용하는가
+	early boot 환경에서는 일반 spinlock이 내부적으로 의존하는 요소들인 lockdep 미초기화, 디버그 훅 재귀 가능성, 스케줄러/IRQ 상태 불안정등이 아직 안전하지 않음
+	raw_spinlock은 이러한 부가 기능을 배제한 가장 원시적인 동기화 수단으로, early boot에서도 잠들지 않고, 의존성 없이 확실한 동기화를 제공한다.
+
+	정적 debug_obj 풀과 pool_boot
+	obj_static_pool[] → debug_obj 실체가 들어 있는 정적 배열
+	pool_boot → 미사용 debug_obj들을 관리하는 free-list(hlist_head)
+	미사용 상태 → pool_boot
+	사용 중 상태 → 해시 버킷 hlist
+
+	첫 번째 반복문
+	해시 테이블 obj_hash[]의 각 버킷 락을 raw spinlock으로 초기화
+	early boot에서도 버킷 hlist를 안전하게 조작할 수 있도록 동기화 기반 마련
+	두 번째 반복문
+	정적 debug_obj 배열(obj_static_pool[])의 원소들을 pool_boot free-list(hlist)에 전부 연결
+	early boot에서 사용할 미사용 debug_obj 공급원 준비
 	*/
-	init_vmlinux_build_id(); //lib/buildid.c
+	debug_objects_early_init();
 	/*
 	커널에서 에러가 나면 그 주소만 뜸
 	어떤 커널에서 어떤 함수들을 거쳐서 어디서 터졌는지에 대한 호출 경로를 쌓는 곳이 스택 트레이스
@@ -1045,10 +1215,16 @@ void start_kernel(void) //시작
 	부팅 시 그 주소가 메모리에서 그대로 유지
 	notes 섹션 시작 주소 : __start_notes, notes 섹션 끝 주소 : __stop_notes
 	
+	ELF 형식은 리눅스에서 실행 파일과 커널이 따르는 표준 바이너리 포맷
+	파일 내부에는 실행을 위한 코드 영역(.text), 전역 및 정적 데이터 영역(.data, .bss), 심볼 테이블과 디버깅 정보를 담은 섹션, 그리고 바이너리 식별과 메타데이터를 위한 ELF NOTE 영역이 함께 포함
+	vmlinux는 이러한 ELF 형식으로 빌드된 리눅스 커널의 원본 실행 파일로, 압축되지 않은 상태에서 코드·데이터·심볼·디버그 정보·build-id NOTE를 모두 포함
+	init_vmlinux_build_id()는 커널 부팅 초기에 메모리에 로드된 vmlinux의 ELF NOTE 영역을 파싱하여 build-id를 추출하고 이를 커널 내부에 저장함
+	이후 크래시 덤프 분석이나 디버깅 과정에서 실행 중이던 커널을 정확히 식별할 수 있도록 함
 	*/
-	cgroup_init_early();
+	init_vmlinux_build_id(); //lib/buildid.c
 	/*
 	*/
+	cgroup_init_early();
 
 	local_irq_disable();
 	early_boot_irqs_disabled = true;

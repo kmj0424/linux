@@ -160,6 +160,7 @@ const void *freader_fetch(struct freader *r, loff_t file_off, size_t sz) // frea
 	/*
 	file_off + sz < file_off 라는 상황은 거의 발생하지 않겠지만 발생한다면 error
 	file_off + sz 계산 중 정수 오버플로우 발생 시 이후 범위 체크가 무의미해짐 -> 에러 처리
+	- 예: file_off가 매우 큰 값인데 sz를 더해 0 근처로 돌아오는 경우
 	*/
 	r->err = -EOVERFLOW; // error overflow
 		return NULL;
@@ -168,7 +169,7 @@ const void *freader_fetch(struct freader *r, loff_t file_off, size_t sz) // frea
 	/* working with memory buffer is much more straightforward
 	메모리 버퍼를 대상으로 작업하는 경우는 훨씬 단순하다 */
 	if (!r->buf) { // 메모리 모드(입력이 이미 메모리에 있는 경우)
-		if (file_off + sz > r->data_sz) {
+		if (file_off + sz > r->data_sz) { // 요청 끝(file_off+sz)이 메모리 버퍼 크기(data_sz)를 넘으면 out-of-range
 			r->err = -ERANGE;
 			return NULL;
 		}
@@ -176,8 +177,9 @@ const void *freader_fetch(struct freader *r, loff_t file_off, size_t sz) // frea
 	}
 
 	/* fetch or reuse folio for given file offset
-	주어진 파일 오프셋에 해당하는 folio를 가져오거나 재사용한다 */
-	r->err = freader_get_folio(r, file_off);
+	주어진 파일 오프셋에 해당하는 folio를 가져오거나 재사용한다 
+	여기부턴 파일 모드 */
+	r->err = freader_get_folio(r, file_off); // file_off가 속한 folio를 가져오거나 재사용 -> 실패하면 r->err 세팅되고 NULL 반환
 	if (r->err)
 		return NULL;
 
@@ -306,18 +308,13 @@ static int parse_build_id(struct freader *r, unsigned char *build_id, __u32 *siz
 
 	while (note_end - note_off > sizeof(Elf32_Nhdr) + note_name_sz) {
 		/*
-		note 엔트리 안에 Elf32_Nhdr이 있고 name도 있을거고 4바이트보다 작을 순 있겠지만 어쨌든 다 돌겠다는거 아닌가?
-		notes 섹션이 항상 온전하다고 보장 할 수 없음
-		-범위가 잘못 잡히거나 데이터 손상되거나 note_size가 정확하지 않거나 등등
-		그런 경우가 왜 생기는지
-	
-		그래도 돌게 되는 조건 아닌가?
 		note_off부터 note_end까지 남은 바이트가 최소한 헤더 12바이트 + name 4바이트 보다 클 떄만 검사
 		note에 헤더는 12바이트 고정 사이즈
-		name과 desc는 4의 배수여야함 4의 배수가 안되면 패딩으로 채워넣기
 		왜 >= 가 아닌가
 		desc에 들은 값을 어차피 봐야해서 볼려면 16보다 커야하니까 build-id 찾기 위해
 		
+		현재 오프셋에서 최소한 헤더(12) + name 크기(4)를 읽을 수 있을 때만 루프 진입.	
+		name/desc의 실제 길이는 4배수일 필요는 없고, 다음 필드로 이동할 때 4바이트 정렬을 맞추기 위해 padding을 포함한 이동량을 ALIGN()로 계산한다.
 		*/
 		nhdr = freader_fetch(r, note_off, sizeof(Elf32_Nhdr) + note_name_sz); // 현재 note의 헤더 읽기
 		if (!nhdr)
@@ -335,11 +332,12 @@ static int parse_build_id(struct freader *r, unsigned char *build_id, __u32 *siz
 		    new_off > note_end)
 		/*
 		check_add_overflow(new_off, ALIGN(name_sz, 4), &new_off)
-		-name 크기(name_sz)가 정상 범위인지 간접적으로 확인하는 단계
+		-name 크기(name_sz)가 정상 범위인지 간접적으로 확인하는 단계 -> 확인 후 다음 주소 반환
 		check_add_overflow(new_off, ALIGN(desc_sz, 4), &new_off)
-		-name 크기(name_sz)가 정상 범위인지 간접적으로 확인하는 단계
+		-desc 크기(desc_sz)가 정상 범위인지 간접적으로 확인하는 단계
 		new_off > note_end : 계산된 note 전체 크기가 notes 컨테이너 범위를 넘는지 확인
 		ALIGN(sz, 4) : 길이를 4바이트 경계로 올림해라
+		끝나면 다음 오프셋
 		*/
 			break;
 
@@ -352,7 +350,7 @@ static int parse_build_id(struct freader *r, unsigned char *build_id, __u32 *siz
 
 			/* freader_fetch() will invalidate nhdr pointer */
 			data = freader_fetch(r, build_id_off, desc_sz); // desc(build-id 바이트) 실제로 읽어오기
-			if (!data)
+			if (!data) // ?가능한가 위에서 사이즈 체크했는데 \0?
 				return r->err;
 
 			memcpy(build_id, data, desc_sz); // build_id(= vmlinux_build_id[])에 build-id 바이트를 복사
@@ -530,6 +528,10 @@ int build_id_parse_buf(const void *buf, unsigned char *build_id, u32 buf_size)
 	struct freader r; // include/linux/buildid.h
 	int err;
 
+	/*
+	파일이 아니라 메모리 버퍼 buf를 입력으로 삼고, 읽을 수 있는 최대 범위는 buf_size까지
+	현재 읽기 위치, 남은 바이트 수, 버퍼 끝 경계를 freader 내부에 세팅
+	*/
 	freader_init_from_mem(&r, buf, buf_size); // 메모리 모드로 초기화
 
 	err = parse_build_id(&r, build_id, NULL, 0, buf_size);
