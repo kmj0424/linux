@@ -55,9 +55,9 @@ static inline void setup_thread_stack(struct task_struct *p, struct task_struct 
  */
 static inline unsigned long *end_of_stack(const struct task_struct *p) // end_of_stack 여기
 {
-#ifdef CONFIG_STACK_GROWSUP
+#ifdef CONFIG_STACK_GROWSUP // 스택이 위로 쌓임 낮은 주소 -> 높은 주소 스택의 끝
 	return (unsigned long *)((unsigned long)task_thread_info(p) + THREAD_SIZE) - 1;
-#else
+#else // 스택이 아래로 쌓임 높은 주소 -> 낮은 주소 thread_info 전
 	return (unsigned long *)(task_thread_info(p) + 1);
 #endif
 }
