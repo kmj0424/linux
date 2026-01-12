@@ -192,7 +192,20 @@ static struct static_key_true *cgroup_subsys_on_dfl_key[] = {
 static DEFINE_PER_CPU(struct css_rstat_cpu, root_rstat_cpu);
 static DEFINE_PER_CPU(struct cgroup_rstat_base_cpu, root_rstat_base_cpu);
 
-/* the default hierarchy */
+/* the default hierarchy 
+cgroup 계층을 나타내는 구조체
+이 트리의 최상위 cgroup(root cgroup)을 가리키고 어떤 컨트롤러들이 붙는지 관리하고 전체 기준점 역할
+cgroup_dfl_root는 기본 cgroup 트리를 대표하는 전역 객체, 커널 컴파일 시점에 전역 변수로 이미 존재
+.cgrp : root cgroup 객체
+.self : root cgroup의 자기자신에 대한 상태(css = cgroup_subsys_state)
+.rstate_cpu : 이 cgroup의 cpu 통계를 저장하는 per-CPU 통계 포인터
+-> 모든 하위 cgroup의 CPU 통계가 여기까지 올라와서 합산됨
+.rstat_base_cpu : cgroup 트리 전체 cpu 통계의 기준(base) 저장소
+
+cgrp_dfl_root는 커널에 전역으로 이미 존재하는 기본 cgroup 트리의 루트 객체
+그 안의 .cgrp는 root cgroup 자체
+rstat_cpu와 rstat_base_cpu는 루트가 CPU 통계 집계의 기준점이 되기 위해 사용하는 전역 통계 저장소 포인터
+*/
 struct cgroup_root cgrp_dfl_root = { // cgrp_dfl_root
 	.cgrp.self.rstat_cpu = &root_rstat_cpu,
 	.cgrp.rstat_base_cpu = &root_rstat_base_cpu,
