@@ -328,8 +328,9 @@ struct kernfs_ops {
 
 /*
  * The kernfs superblock creation/mount parameter context.
+ kernfs는 커널 내부에서 만드는 가상 파일시스템 트리를 관리하는 기반 계층
  */
-struct kernfs_fs_context {
+struct kernfs_fs_context { // kernfs_fs_context
 	struct kernfs_root	*root;		/* Root of the hierarchy being mounted */
 	void			*ns_tag;	/* Namespace tag of the mount (or NULL) */
 	unsigned long		magic;		/* File system specific magic number */

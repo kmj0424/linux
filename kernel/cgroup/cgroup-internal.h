@@ -41,6 +41,7 @@ extern void __init enable_debug_cgroup(void);
 
 /*
  * The cgroup filesystem superblock creation/mount context.
+ cgroupfs를 구성(mount/초기화)할 떄 쓰는 컨텍스트
  */
 struct cgroup_fs_context { // cgroup_fs_context
 	struct kernfs_fs_context kfc;

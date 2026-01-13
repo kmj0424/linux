@@ -6321,32 +6321,107 @@ static void __init cgroup_init_subsys(struct cgroup_subsys *ss, bool early)
  */
 int __init cgroup_init_early(void) // cgroup_init_early
 {
+	/*
+	ctx(cgroup_fs_context) : cgroup 계층(root/hierarchy)을 초기화할 때 필요한 작업 컨텍스트 묶음
+	ctx.root만 채워서 init_cgroup_root()에 전달하는 용도로 사용
+	__initdata : ctx는 부팅 끄타면 데이터도 버릴 수 있도록
+	*/
 	static struct cgroup_fs_context __initdata ctx;
+	/*
+	ss : cgroup 컨트롤러(=subsystem)를 하나씩 가리키는 포인터
+	cpu/memory/io/pids 등 자원 정책/회계 로직이 subsystem 단위로 존재
+	*/
 	struct cgroup_subsys *ss;
 	int i;
 
+	/*
+	- 이번에 초기화할 cgroup 계층의 루트가 default root(cgrp_dfl_root)임을 컨텍스트에 지정.
+	- cgrp_dfl_root는 전역으로 이미 존재하는 struct cgroup_root 객체.
+	(커널 이미지에 포함되어 있고 부팅 중에 초기화만 함)
+	*/
 	ctx.root = &cgrp_dfl_root;
+	/*
+	- ctx.root가 가리키는 cgroup_root(=cgrp_dfl_root)를 유효한 계층으로 초기화.
+	- 여기서 실제로 하는 일 :
+	root->cgrp(루트 cgroup 노드) 기본 연결(부모 없음/자식 리스트/기본 상태)
+	계층 전체 메타(락/리스트/기본 플래그) 초기화
+	이후 컨트롤러들이 붙을 수 있는 최소 상태 마련
+	*/
 	init_cgroup_root(&ctx);
+	/*
+	root cgroup의 self(css) 플래그에 CSS_NO_REF를 설정
+	루트 cgroup의 css는 일반 css처럼 refcout로 생명주기를 관리하는 대상이 아님(특수 객체)
+	루트는 시스템 전체 생명주기와 함께
+	*/
 	cgrp_dfl_root.cgrp.self.flags |= CSS_NO_REF;
+	/*
+	init_task.cgroups : task_struct가 cgroup 소속을 가리키는 포인터(실제는 css_set로 연결)
+	프로세스 문자열 그룹 이름을 들고 있지 않고, 포인터(구조체)로 연결
 
+	init_css_set : 부팅 초기에 사용되는 기본 css_set(컨트롤러별 소속 조합의 기본값)
+	
+	RCU_INIT_POINTER : RCU 보호 포인터를 초기화할 때 쓰는 매크로
+	cgroup 경로는 RCU 기반 접근이 많아서 초기부터 이 규칙을 지키며 세팅
+	?RCU
+	*/
 	RCU_INIT_POINTER(init_task.cgroups, &init_css_set);
+	/*
+	for_each_subsys(ss, i) : 등록된 모든 cgroup_subsys(컨트롤러)를 순회
+	i는 컨트롤러 ID로 사용, ss는 해당 컨트롤러 구조체 포인터
 
+	컨트롤러 정의가 정상인지 sanity check
+	컨트롤러에 id/name(및 legacy_name) 확정 부여
+	early_init이 필요한 컨트롤러만 조기 초기화
+	*/
 	for_each_subsys(ss, i) {
+		/*
+		!ss->css_alloc || !ss->css_free
+		-> 컨트롤러는 각 cgroup에 붙는 상태(css)를 생성하고 해제도 해야함
+		둘 중 하나라도 없으면 컨트롤러 성립 x
+
+		ss->name || ss->id
+		-> 아래에서 id/name을 설정할 건데, 이미 값이 있으며 초기화가 중복되었거나 등록 순서가 꼬인것
+
+		컨트롤러가 초기 상태로 올바르게 등록되어 있는지 점검하는 sanity check(경고만 하고 계속 진행)
+		*/
 		WARN(!ss->css_alloc || !ss->css_free || ss->name || ss->id,
 		     "invalid cgroup_subsys %d:%s css_alloc=%p css_free=%p id:name=%d:%s\n",
 		     i, cgroup_subsys_name[i], ss->css_alloc, ss->css_free,
 		     ss->id, ss->name);
-		// 서브시스템 이름 길이가 최대 허용 길이 넘으면 경고
+		/*
+		cgroup_subsys_name[i] : 컨트롤러 이름 문자열(cpu, memory, io)
+		MAX_CGROUP_TYPE_NAMELEN : 컨트롤러 타입 이름 최대 길이 제한
+		컨트롤러 이름은 사용자 인터페이스(파일/디렉토리 이름)로도 쓰임
+		서브시스템 이름 길이가 최대 허용 길이 넘으면 경고
+		*/
 		WARN(strlen(cgroup_subsys_name[i]) > MAX_CGROUP_TYPE_NAMELEN,
 		     "cgroup_subsys_name %s too long\n", cgroup_subsys_name[i]);
+		/*
+		early_init : 이 컨트롤러는 부팅 초기에 먼저 초기화 ?어떤게 초기화
+		css_rstat_flush : rstat(계층 통계 집계/플러시) 경로를 사용거나 지원하는 컨트롤러 측 훅
+
+		- rstat은 통계 집계 인프라(플러시/누적)가 필요해서 초기화 의존성이 상대적으로 무거움.
+		- early_init 단계는 부팅 초반이라 모든 인프라가 갖춰지지 않았을 수 있음.
+		early_init 컨트롤러가 rstat까지 함께 쓰면 초기화 시점 충돌/의존성 문제가 생길 수 있음.
+		그래서 이 조합을 경고한다.
+		*/
 		WARN(ss->early_init && ss->css_rstat_flush,
 		     "cgroup rstat cannot be used with early init subsystem\n");
 
-		ss->id = i;
-		ss->name = cgroup_subsys_name[i];
+		ss->id = i; // 컨트롤러의 내부 식별자(id) 확정.
+		ss->name = cgroup_subsys_name[i]; // 컨트롤러의 이름(name)을 확정.
+		/*
+		legacy_name : v1 호환/레거시 경로에서 쓰는 이름 슬롯
+		따로 지정된 게 없으면 기본 이름을 그대로 사용
+		레거시 네임이 없다면 컨트롤러 i번 = 이름 고정
+		*/
 		if (!ss->legacy_name)
 			ss->legacy_name = cgroup_subsys_name[i];
-
+		/*
+		해당 컨트롤러가 루트/기본 cgroup에 붙을 수 있도록 필요한 최소 상태(css) 준비 및 초기 연결 수행.
+		true는 early 경로임을 나타내는 인자(일반적으로 제약/범위가 다름).
+		?early_init은 존재하고 flush는 아닌거?
+		*/
 		if (ss->early_init)
 			cgroup_init_subsys(ss, true);
 	}
