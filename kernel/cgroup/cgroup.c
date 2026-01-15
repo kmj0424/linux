@@ -2146,11 +2146,40 @@ static void init_cgroup_housekeeping(struct cgroup *cgrp)
 }
 
 void init_cgroup_root(struct cgroup_fs_context *ctx) // init_cgroup_root
+/*
+cgroup 계층(hierarchy) 하나를 커널 내부에서 성립시키는 초기화 함수.
+이 계층(root)이 전역 목록에 붙을 수 있는 리스트 헤드 준비
+이 계층이 가진 cgroup 개수 카운터(nr_cgrps)의 초기값 설정(루트 1개)
+root cgroup 노트(cgrp)가 자신이 속한 계층(root)을 가리키게 연결
+루트 cgroup 노드의 기본 내부 상태(리스트/플래그/housekeeping) 초기화
+ctx에 담긴 계층 옵션(flags, name, release_agent 등)을 root/cgrp에 반영
+
+ctx가 가리키는 cgroup_root(= 계층 관리자)와 그 안의 root cgroup 노드(root->cgrp)를
+최소한 루트 계층으로서 동작 가능하게 만들어줌.
+
+ctx(struct cgroup_fs_context *) : cgroup 계층을 구성하기 위한 작업 컨텍스트
+*/
 {
+	/*
+	root (struct cgroup_root) : 하나의 cgroup 계층(hierarchy) 전체를 대표하는 관리자 객체
+	이 계층의 최상위 cgroup 노드(root cgroup)를 포함/관리한다.
+
+	cgrp (struct cgroup) : 트리의 노드 하나(그룹 하나), 최상위(root) cgroup 노드
+	*/
 	struct cgroup_root *root = ctx->root;
 	struct cgroup *cgrp = &root->cgrp;
 
+	/*
+	root_list : cgroup_root(계층)들을 모아둔 전역 리스트
+
+	INIT_LIST_HEAD_RCU : list_head 초기화
+	RCU 붙는 이유 : 이 리스트는 런타임에서 RCU 읽기 경로로 순회될 수 있기 때문에
+	이 리스트는 RCU 규칙을 따라 갱신된다는 의미가 포함된 초기화 매크로를 사용
+	*/
 	INIT_LIST_HEAD_RCU(&root->root_list);
+	/*
+	nr_cgrps : 이 계층(root) 아래에 존재하는 cgroup(노드)의 개수 카운터(atomic)
+	*/
 	atomic_set(&root->nr_cgrps, 1);
 	cgrp->root = root;
 	init_cgroup_housekeeping(cgrp);
