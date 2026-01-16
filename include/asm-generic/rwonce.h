@@ -52,11 +52,13 @@
 
 #define __WRITE_ONCE(x, val)						\
 do {									\
+	// volatile 캐스팅, 정확히 한 번의 store
 	*(volatile typeof(x) *)&(x) = (val);				\
 } while (0)
 
 #define WRITE_ONCE(x, val)						\
 do {									\
+// WRITE_ONCE로 써도 되는 타입인지 컴파일 타임에 검사
 	compiletime_assert_rwonce_type(x);				\
 	__WRITE_ONCE(x, val);						\
 } while (0)

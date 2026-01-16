@@ -41,7 +41,7 @@
  * the result is an empty list.
  */
 static inline void INIT_LIST_HEAD(struct list_head *list)
-{
+{ // 컴파일러가 x에 대한 쓰기를 쪼개거나, 캐싱하거나, 제거하지 못하게 보장하는 단일 쓰기(write) 매크로
 	WRITE_ONCE(list->next, list);
 	WRITE_ONCE(list->prev, list);
 }

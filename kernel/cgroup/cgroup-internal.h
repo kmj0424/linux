@@ -41,20 +41,32 @@ extern void __init enable_debug_cgroup(void);
 
 /*
  * The cgroup filesystem superblock creation/mount context.
+cgroup 파일시스템의 슈퍼블록 생성 및 마운트 컨텍스트
+filesystem : cgroupfs라는 가상 파일시스템
+superblock : 파일시스템 하나를 대표하는 최상위 메타데이터 구조체
+이 파일시스템의 종류, 루트, 옵션 등
+creation : superblock을 새로 만드는 과정
+mount : 그 superblock을 기존 경로 트리에 연결하는 과정
+context : 작업 중에 잠깐 쓰는 설정 묶음, 실제 구조체가 아니라 구조체를 만들기 위한 재료
+cgroupfs의 superblock을 생성하거나 mount할 때 사용하는 작업 컨텍스트
+어떤 cgroup 계층을 대상으로 어떤 옵션으로 파일시스템을 구성할지
  */
-struct cgroup_fs_context {
+struct cgroup_fs_context { // cgroup_fs_context
 	struct kernfs_fs_context kfc;
 	struct cgroup_root	*root;
 	struct cgroup_namespace	*ns;
 	unsigned int	flags;			/* CGRP_ROOT_* flags */
 
-	/* cgroup1 bits */
-	bool		cpuset_clone_children;
-	bool		none;			/* User explicitly requested empty subsystem */
-	bool		all_ss;			/* Seen 'all' option */
-	u16		subsys_mask;		/* Selected subsystems */
-	char		*name;			/* Hierarchy name */
-	char		*release_agent;		/* Path for release notifications */
+	/* cgroup1 bits cgroup v1 전용 */
+	bool		cpuset_clone_children; // 자식 cgroup이 부모의 cpuset 설정을 복제할지
+	bool		none;			/* User explicitly requested empty subsystem 
+	사용자가 명시적으로 비어있는 서브 시스템을 요청
+	mount 옵션에서 아무 컨트롤러도 붙이지 않겠다는 요청이 있음을 표시 */
+	bool		all_ss;			/* Seen 'all' option 'all' 옵션이 사용되었음을 기록
+	mount에서 모든 컨트롤러 포함하라는 요청 있음을 표시 */
+	u16		subsys_mask;		/* Selected subsystems 선택된 서브시스템(컨트롤러) 비트마스크 */
+	char		*name;			/* Hierarchy name 계층(hierarchy)의 이름 */
+	char		*release_agent;		/* Path for release notifications release 이벤트 알림을 위한 경로 */
 };
 
 static inline struct cgroup_fs_context *cgroup_fc2context(struct fs_context *fc)
@@ -181,6 +193,11 @@ extern bool cgrp_dfl_visible;
  * @ssid: the index of @ss, CGROUP_SUBSYS_COUNT after reaching the end
  */
 #define for_each_subsys(ss, ssid)					\
+/*
+ssid를 0부터 CGROUP_SUBSYS_COUNT - 1까지 증가시키면서
+각 인덱스에 해당하는 cgroup_subsys[ssid]를 ss에 대입하고
+모든 subsystem 슬롯을 빠짐없이 순회한다
+*/
 	for ((ssid) = 0; (ssid) < CGROUP_SUBSYS_COUNT &&		\
 	     (((ss) = cgroup_subsys[ssid]) || true); (ssid)++)
 

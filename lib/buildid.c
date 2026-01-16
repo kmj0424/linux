@@ -281,7 +281,7 @@ static int parse_build_id(struct freader *r, unsigned char *build_id, __u32 *siz
 	*/
 	const char note_name[] = "GNU"; // note name : GNU에서 type=BUILD_ID인 note를 찾기 위함
 	const size_t note_name_sz = sizeof(note_name); // G N U \0 4바이트
-	u32 build_id_off, new_off, note_end, name_sz, desc_sz;
+	u32 build_id_off, new_off, note_end, name_sz, desc_sz; // 전역? 무조건u32? 누가 세팅? 쓰레기값?
 	const Elf32_Nhdr *nhdr;
 	const char *data;
 	/*
@@ -302,7 +302,8 @@ static int parse_build_id(struct freader *r, unsigned char *build_id, __u32 *siz
 	64비트 ELF에서도 Nhdr 자체는 동일한 구조(32-bit 필드)를 쓴다
 	-> note 구조는 대개 32-bit 필드로 고정된 포맷이라서
 	*/
-	
+
+	// 결과를 비교하는 게 아니라, 덧셈 연산 자체가 타입 범위를 넘었는지를 컴파일러가 직접 판별. note_end는 그 정상 결과를 담는 출력 변수다.
 	if (check_add_overflow(note_off, note_size, &note_end)) // 오버플로우면 true, 아니면 결과를 note_end에 저장
 		return -EINVAL; // 인자가 잘못됐나는 의미의 표준 errno(커널에서 음수로 리턴)
 
