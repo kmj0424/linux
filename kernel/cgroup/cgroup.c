@@ -202,6 +202,7 @@ cgroup_dfl_root는 기본 cgroup 트리를 대표하는 전역 객체, 커널 �
 -> 모든 하위 cgroup의 CPU 통계가 여기까지 올라와서 합산됨
 .rstat_base_cpu : cgroup 트리 전체 cpu 통계의 기준(base) 저장소
 
+cgrp_dfl_root는 cgroup v2의 기본 루트 계층을 대표하는 전역 struct cgroup_root 객체
 cgrp_dfl_root는 커널에 전역으로 이미 존재하는 기본 cgroup 트리의 루트 객체
 그 안의 .cgrp는 root cgroup 자체
 rstat_cpu와 rstat_base_cpu는 루트가 CPU 통계 집계의 기준점이 되기 위해 사용하는 전역 통계 저장소 포인터
@@ -373,17 +374,42 @@ bool cgroup_on_dfl(const struct cgroup *cgrp)
 	return cgrp->root == &cgrp_dfl_root;
 }
 
-/* IDR wrappers which synchronize using cgroup_idr_lock */
-static int cgroup_idr_alloc(struct idr *idr, void *ptr, int start, int end,
+/* IDR wrappers which synchronize using cgroup_idr_lock
+cgroup_idr_alloc()는 cgroup 전용 IDR에 대해,
+동시성 보호와 메모리 할당 제약을 포함해 ID를 하나 할당하는 헬퍼 함수 
+idr : ID를 할당할 IDR 객체
+ptr : 해당 ID에 매핑할 커널 객체 포인터
+start : 할당 가능한 ID의 시작 값
+end	: 할당 가능한 ID의 끝 값 (0이면 제한 없음)
+gfp_mask : 메모리 할당 시 사용할 GFP 플래그
+*/
+static int cgroup_idr_alloc(struct idr *idr, void *ptr, int start, int end, // cgroup_idr_alloc
 			    gfp_t gfp_mask)
 {
 	int ret;
 
+	/*
+	IDR 내부 노드(radix/xarray)를 위한 메모리를 락 밖에서 미리 할당(preload)한다.
+	spinlock을 잡은 상태에서 sleep이 발생하지 않도록 하기 위함.
+	*/
 	idr_preload(gfp_mask);
+	/* cgroup 전역 IDR 보호 락
+	bh(bottom half) 컨텍스트에서도 안전하도록 spin_lock_bh 사용.
+	cgroup_idr_alloc()는 커널 런타임 중 호출되는 코드로, lockdep 및 bh-safe 동작이 필요해서
+	raw_spinlock이 아닌	일반 spinlock(spin_lock_bh)을 사용 */
 	spin_lock_bh(&cgroup_idr_lock);
+	/*
+	IDR에 ptr을 저장하고, [start, end] 범위 내에서 새로운 ID를 하나 할당한다.
+	__GFP_DIRECT_RECLAIM을 제거하여	reclaim 경로에서 재진입/데드락을 방지한다.
+	ptr → 나중에 ID로 다시 찾을 실제 객체
+	__GFP_DIRECT_RECLAIM 제거 이유 : reclaim 중 cgroup 코드 재진입 방지,lock inversion 방지
+	*/
 	ret = idr_alloc(idr, ptr, start, end, gfp_mask & ~__GFP_DIRECT_RECLAIM);
-	spin_unlock_bh(&cgroup_idr_lock);
-	idr_preload_end();
+
+	spin_unlock_bh(&cgroup_idr_lock); // IDR 수정 완료 후 락 해제
+	idr_preload_end(); // idr_preload()로 확보한 임시 메모리 컨텍스트 종료
+	/* 성공 시 할당된 ID 반환
+	실패 시 음수 errno 반환 */
 	return ret;
 }
 
@@ -2170,7 +2196,7 @@ ctx(struct cgroup_fs_context *) : cgroup 계층을 구성하기 위한 작업 �
 	struct cgroup *cgrp = &root->cgrp;
 
 	/*
-	root_list : cgroup_root(계층)들을 모아둔 전역 리스트
+	root_list : cgroup_root(계층)들을 모아둘 전역 리스트
 
 	INIT_LIST_HEAD_RCU : list_head 초기화
 	RCU 붙는 이유 : 이 리스트는 런타임에서 RCU 읽기 경로로 순회될 수 있기 때문에
@@ -2179,18 +2205,49 @@ ctx(struct cgroup_fs_context *) : cgroup 계층을 구성하기 위한 작업 �
 	INIT_LIST_HEAD_RCU(&root->root_list);
 	/*
 	nr_cgrps : 이 계층(root) 아래에 존재하는 cgroup(노드)의 개수 카운터(atomic)
+	계층을 방금 만들어서 현재 존재하는 cgroup은 루트 cgroup 1개라 1로 세팅
+
+	런타임에서 cgroup이 생성/삭제되면서 이 카운터가 여러 CPU에서 갱신될 수 있음
+	그래서 atomic 타입을 사용해 경쟁 상황에서도 값이 깨지지 않도록 함.
+	atomic 타입은 여러 CPU가 동시에 접근하더라도 중간에 값이 깨지지 않도록
+	원자적으로(한 번에) 연산이 이루어지는 타입
 	*/
 	atomic_set(&root->nr_cgrps, 1);
-	cgrp->root = root;
+	cgrp->root = root; // 루트 연결
+	/*
+	내부 상태 초기화
+	housekeeping : cgroup 노드는 단순 트리 노드가 아니라 런타임에서 여러 관리대상을 가지고 변화함
+	여러 관리 대상 -> 리스트/플러그/상태
+
+	cgrp를 그냥 구조체가 아니라 정상 동작 가능한 루트 노드로 만드는 초기화
+	*/
 	init_cgroup_housekeeping(cgrp);
 
-	/* DYNMODS must be modified through cgroup_favor_dynmods() */
+	/* DYNMODS must be modified through cgroup_favor_dynmods()
+	~ : 모든 비트를 뒤집는다 0010 -> 1101
+	ctx->flags, ~CGRP_ROOT_FAVOR_DYNMODS AND 연산
+	동적으로 로드되는 모듈(특정 하드웨어나 기능을 추가하기 위해 나중에 로드되는 코드 조각들)
+	CGRP_ROOT_FAVOR_DYNMODS : 동적으로 로드되는 모듈특정 하드웨어나 기능을 추가하기 위해 나중에 로드되는 코드 조각들을 선호하는 루트 cgroup을 의미하는 비트 ex)0001 0000
+	~CGRP_ROOT_FAVOR_DYNMODS : 1110 1111
+	*/
 	root->flags = ctx->flags & ~CGRP_ROOT_FAVOR_DYNMODS;
+	/* mount 옵션에 release_agent=...가 지정되었는지 검사
+	ctx->release_agent : NULL → 옵션 없음, non-NULL → 문자열 포인터
+	특정 cgroup이 완전히 비워질 때 실행되는 사용자 지정 스크립트나 명령어 */
 	if (ctx->release_agent)
+	/* ctx->release_agent 문자열을 root->release_agent_path에 복사 최대 길이: PATH_MAX
+	cgroup 루트에 release_agent 실행 경로가 저장됨 */
 		strscpy(root->release_agent_path, ctx->release_agent, PATH_MAX);
-	if (ctx->name)
+	if (ctx->name) // mount 시 name 옵션 있는지
+	/* 해당 cgroup hierarchy에 식별용 이름 부여
+	주 용도 : 디버깅, 내부 식별, 여러 루트 구분 (특히 v1) */
 		strscpy(root->name, ctx->name, MAX_CGROUP_ROOT_NAMELEN);
-	if (ctx->cpuset_clone_children)
+	if (ctx->cpuset_clone_children) // mount 옵션
+	/* root->cgrp.flags 비트필드에서 CGRP_CPUSET_CLONE_CHILDREN 비트를 1로 설정
+	set_bit() : 원자적 비트 연산, 동시 접근 안전
+	이 루트 아래에서 생성되는 cpuset cgroup들은 부모의 cpuset 설정을 자동으로 상속
+	cpuset 컨트롤러의 동작 방식이 변경됨
+	*/
 		set_bit(CGRP_CPUSET_CLONE_CHILDREN, &root->cgrp.flags);
 }
 
@@ -6284,38 +6341,53 @@ static struct kernfs_syscall_ops cgroup_kf_syscall_ops = {
 	.rmdir			= cgroup_rmdir,
 	.show_path		= cgroup_show_path,
 };
-
-static void __init cgroup_init_subsys(struct cgroup_subsys *ss, bool early)
+/*
+early : early 부팅 단계인지
+true : 아직 많은 커널 인프라(특히 percpu allocation 등)가 안전하게 동작 안 하는 단계
+false : 일반적인 init 단계(메모리 할당/퍼CPU 초기화 등 가능)
+*/
+static void __init cgroup_init_subsys(struct cgroup_subsys *ss, bool early) // cgroup_init_subsys
 {
 	struct cgroup_subsys_state *css;
-
+	/* 디버그 로그 / ss -> name 은 컨트롤러 이름 */
 	pr_debug("Initializing cgroup subsys %s\n", ss->name);
-
+	/*
+	cgroup 코어 구조를 바꾸는 작업은 큰 락으로 보호됨.
+	여기서 하는 일이 전부 컨트롤러 등록/루트 css 생성/전역 배열 업데이트 같은 구조 변경이므로 락이 필요.
+	*/
 	cgroup_lock();
 
-	idr_init(&ss->css_idr);
-	INIT_LIST_HEAD(&ss->cfts);
+	idr_init(&ss->css_idr); // 이 컨트롤러의 css들에 ID를 부여하고 조회하기 위한 IDR(id → css 매핑)
+	INIT_LIST_HEAD(&ss->cfts); // 컨트롤러가 제공하는 컨트롤 파일 타입 목록 리스트를 빈 리스트 초기롸
 
-	/* Create the root cgroup state for this subsystem */
-	ss->root = &cgrp_dfl_root;
-	css = ss->css_alloc(NULL);
+	/* Create the root cgroup state for this subsystem 서브시스템을 위한 루트 cgroup 상태(css)를 생성*/
+	ss->root = &cgrp_dfl_root; // 이 컨트롤러가 속할 cgroup hierarchy를 default(v2) root로 지정
+	css = ss->css_alloc(NULL); // 컨트롤러 콜백 css_alloc(NULL) 호출 / parent 없음 → 루트 css 생성
 	/* We don't handle early failures gracefully */
-	BUG_ON(IS_ERR(css));
-	init_and_link_css(css, ss, &cgrp_dfl_root.cgrp);
-
+	BUG_ON(IS_ERR(css)); // 실패 시 복구 불가 → 즉시 BUG
+	init_and_link_css(css, ss, &cgrp_dfl_root.cgrp); // 생성된 css를 컨트롤러(ss)루트 cgroup(cgrp_dfl_root.cgrp)에 연결(link)
+	// 이후 생성되는 모든 css들은 이 루트 css를 부모로 삼게 됨
 	/*
 	 * Root csses are never destroyed and we can't initialize
 	 * percpu_ref during early init.  Disable refcnting.
+	 * 루트 css들은 절대 파괴되지 않으며, early init 단계에서는 percpu_ref를 초기화할 수 없다.
+	 * 따라서 참조 카운팅(refcounting)을 비활성화한다.
+	 * 생명주기 관리 대상에서 제외
 	 */
 	css->flags |= CSS_NO_REF;
 
 	if (early) {
-		/* allocation can't be done safely during early init */
+		/* allocation can't be done safely during early init
+		early init 단계에서는 할당(allocation)을 안전하게 수행할 수 없다.
+		-> 직접 대입 */
 		css->id = 1;
 	} else {
+		/* GEP_KERNEL : 일반 커널 컨텍스트에서 쓰는 표준 메모리 할당 옵션
+		이 컨트롤러의 루트 css를 IDR에 등록하고, 고유 식별자 ID=1을 발급하여 css->id에 저장 */
 		css->id = cgroup_idr_alloc(&ss->css_idr, css, 1, 2, GFP_KERNEL);
-		BUG_ON(css->id < 0);
-
+		BUG_ON(css->id < 0); // 루트 css는 반드시 ID=1로 등록되어야 하는데 0보다 작으면 에러
+		/* ss_rstat_init(ss) : 컨트롤러(ss) 단위 rstat 인프라(락, per-cpu 리스트 헤드 등) 준비
+		css_rstat_init(css) : 루트 css 단위 per-cpu 통계 저장 구조 준비 (css->rstat_cpu 등) */
 		BUG_ON(ss_rstat_init(ss));
 		BUG_ON(css_rstat_init(css));
 	}
@@ -6323,9 +6395,20 @@ static void __init cgroup_init_subsys(struct cgroup_subsys *ss, bool early)
 	/* Update the init_css_set to contain a subsys
 	 * pointer to this state - since the subsystem is
 	 * newly registered, all tasks and hence the
-	 * init_css_set is in the subsystem's root cgroup. */
+	 * init_css_set is in the subsystem's root cgroup.
+	 * init_css_set이 이 상태(css)를 가리키는 서브시스템 포인터를 포함하도록 갱신한다.
+	 * 이 서브시스템은 새로 등록된 것이므로, 모든 태스크는 해당 서브시스템의 루트 cgroup에 속해 있으며,
+	 * 따라서 init_css_set 역시 그 루트 cgroup에 속한다.
+	 * init_css_set은 init task 및 초기 태스크들의 기본 css_set
+	 *  */
 	init_css_set.subsys[ss->id] = css;
 
+	/*
+	ss->fork, exit .. 같은 함수 포인터가 NULL이 아니면 1, NULL이면 0으로 변환
+	그 값을 ss->id만큼 시프트해서 해당 비트에 반영, 전역 마스크에 OR로 누적
+	매번 모든 컨트롤러를 돌면서 함수 포인터 NULL 검사하면 느림
+	그래서 콜백 있는 컨트롤러만 빠르게 골라 호출하기 위한 캐시가 필요
+	*/
 	have_fork_callback |= (bool)ss->fork << ss->id;
 	have_exit_callback |= (bool)ss->exit << ss->id;
 	have_release_callback |= (bool)ss->release << ss->id;
@@ -6333,10 +6416,12 @@ static void __init cgroup_init_subsys(struct cgroup_subsys *ss, bool early)
 
 	/* At system boot, before all subsystems have been
 	 * registered, no tasks have been forked, so we don't
-	 * need to invoke fork callbacks here. */
-	BUG_ON(!list_empty(&init_task.tasks));
+	 * need to invoke fork callbacks here.
+	 * 시스템 부틴 시점에서, 모든 서브시스템이 등록되기 전에는
+	 * 어떤 태스크도 fork되지 않았으므로, 여기서 fork 콜백을 호출할 필요가 없다. */
+	BUG_ON(!list_empty(&init_task.tasks)); // init_task.tasks 리스트가 비어있는지 검사
 
-	BUG_ON(online_css(css));
+	BUG_ON(online_css(css)); // css 라이프사이클을 online으로 전환
 
 	cgroup_unlock();
 }
@@ -6351,9 +6436,9 @@ static void __init cgroup_init_subsys(struct cgroup_subsys *ss, bool early)
 int __init cgroup_init_early(void) // cgroup_init_early
 {
 	/*
-	ctx(cgroup_fs_context) : cgroup 계층(root/hierarchy)을 초기화할 때 필요한 작업 컨텍스트 묶음
+	ctx(cgroup_fs_context) : cgroup 계층(root/hierarchy)을 초기화할 때 필요한 작업 컨텍스트 구조체
 	ctx.root만 채워서 init_cgroup_root()에 전달하는 용도로 사용
-	__initdata : ctx는 부팅 끄타면 데이터도 버릴 수 있도록
+	__initdata : ctx는 부팅 끝나면 데이터도 버릴 수 있도록
 	*/
 	static struct cgroup_fs_context __initdata ctx;
 	/*
@@ -6361,15 +6446,16 @@ int __init cgroup_init_early(void) // cgroup_init_early
 	cpu/memory/io/pids 등 자원 정책/회계 로직이 subsystem 단위로 존재
 	*/
 	struct cgroup_subsys *ss;
-	int i;
+	int i; // 컨트롤러 인덱스
 
 	/*
 	- 이번에 초기화할 cgroup 계층의 루트가 default root(cgrp_dfl_root)임을 컨텍스트에 지정.
-	- cgrp_dfl_root는 전역으로 이미 존재하는 struct cgroup_root 객체.
+	- cgrp_dfl_root는 root가 들어갈 메모리만 확보해둔, 전역으로 이미 존재하는 struct cgroup_root 객체.
 	(커널 이미지에 포함되어 있고 부팅 중에 초기화만 함)
 	*/
 	ctx.root = &cgrp_dfl_root;
 	/*
+	cgroupfs mount 옵션을 평가한 뒤, 문자열 복사와 비트 설정을 통해 실제 cgroup 루트의 동작을 확정하는 단계
 	- ctx.root가 가리키는 cgroup_root(=cgrp_dfl_root)를 유효한 계층으로 초기화.
 	- 여기서 실제로 하는 일 :
 	root->cgrp(루트 cgroup 노드) 기본 연결(부모 없음/자식 리스트/기본 상태)

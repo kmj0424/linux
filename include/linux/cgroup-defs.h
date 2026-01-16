@@ -101,6 +101,11 @@ enum {
 	 * and then seeding it with CLONE_INTO_CGROUP doesn't require write
 	 * locking cgroup_threadgroup_rwsem and thus doesn't benefit from
 	 * favordynmod.
+	 * 
+	 * cgroup v2 에서 동적 컨트롤러 활성화(dynmods)를 선호한다는 정책 플래그
+	 * dynmodes (dynamic modifications) : 동적 변경
+	 * 1 << 4 : 5번째 비트 (0부터 세면 bit4)
+	 * struct cgroup_root::flags 안에 저장되는 플래그 중 하나
 	 */
 	CGRP_ROOT_FAVOR_DYNMODS = (1 << 4),
 
@@ -176,14 +181,15 @@ struct cgroup_file {
  * Fields marked with "PI:" are public and immutable and may be accessed
  * directly without synchronization.
  */
-struct cgroup_subsys_state {
-	/* PI: the cgroup that this css is attached to */
+struct cgroup_subsys_state { // cgroup_subsys_state
+	/* PI: the cgroup that this css is attached to PI: 이 css가 붙어있는 cgroup */
 	struct cgroup *cgroup;
 
-	/* PI: the cgroup subsystem that this css is attached to */
+	/* PI: the cgroup subsystem that this css is attached to PI: 이 css가 속한 서브시스템(컨트롤러)*/
 	struct cgroup_subsys *ss;
 
-	/* reference count - access via css_[try]get() and css_put() */
+	/* reference count - access via css_[try]get() and css_put()
+	참조 카운트 css_get()/css_tryget()과 css_put()을 통해 접근 */
 	struct percpu_ref refcnt;
 
 	/*
@@ -200,13 +206,23 @@ struct cgroup_subsys_state {
 	 *     performed in cgroup_init_subsys() in the non-early path
 	 *   when css->cgroup is not the root cgroup
 	 *     performed in css_create()
+	 * 
+	 * 문맥에 따라 이 필드는 css_rstat_init()로 서로 다른 위치에서 초기화된다.
+	 * 경우를 나눠서 설명:
+	 * css가 cgroup::self(= core가 갖는 “공통 self css”)에 연결될 때:
+	 * root cgroup이면 cgroup_init()
+	 * root가 아니면 cgroup_create()
+	 * css가 특정 서브시스템에 연결될 때(컨트롤러 css):
+	 * root cgroup이면 (non-early 경로에서) cgroup_init_subsys()
+	 * root가 아니면 css_create()
 	 */
 	struct css_rstat_cpu __percpu *rstat_cpu;
 
 	/*
 	 * siblings list anchored at the parent's ->children
-	 *
+	 * 형제 리스트는 부모의 ->children에 매달린다.
 	 * linkage is protected by cgroup_mutex or RCU
+	 * 이 링크 연결(linkage)은 cgroup_mutex 또는 RCU로 보호된다.
 	 */
 	struct list_head sibling;
 	struct list_head children;
@@ -214,6 +230,8 @@ struct cgroup_subsys_state {
 	/*
 	 * PI: Subsys-unique ID.  0 is unused and root is always 1.  The
 	 * matching css can be looked up using css_from_id().
+	 * PI: 서브시스템 고유 ID. 0은 사용 안 하고, root는 항상 1.
+	 * css_from_id()로 이 id에 해당하는 css를 찾을 수 있다.
 	 */
 	int id;
 

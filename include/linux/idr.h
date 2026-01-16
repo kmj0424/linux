@@ -151,9 +151,19 @@ DEFINE_CLASS(idr_alloc, struct __class_idr,
  */
 static inline void idr_init_base(struct idr *idr, int base)
 {
+	/*
+	idr->idr_rt : IDR 내부에서 ID → 객체 포인터를 저장하는 핵심 자료구조
+	실제 구현은 radix tree : 정수 키를 비트 단위로 쪼개서 단계적으로 내려가며 값을 찾는 트리 구조
+	INIT_RADIX_TREE : radix tree를 완전히 빈 상태로 초기화
+
+	IDR_RT_MARKER : IDR 전용 marker bit
+	IDR은 radix tree를 그대로 쓰지 않고 이 엔트리는 IDR이 관리 중이라는 표시를 위해 marker를 사용
+
+	이 IDR이 사용할 radix tree를 깨끗하게 비우고, IDR용 마커 설정까지 완료한다
+	*/
 	INIT_RADIX_TREE(&idr->idr_rt, IDR_RT_MARKER);
-	idr->idr_base = base;
-	idr->idr_next = 0;
+	idr->idr_base = base; // ID 시작 번호 설정
+	idr->idr_next = 0; // 다음 ID 검색 위치 초기화
 }
 
 /**
