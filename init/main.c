@@ -988,7 +988,7 @@ void start_kernel(void) //시작
 	이 값은 정상적인 실행 중에는 절대로 변경되지 않아야 함
 	만약 커널 스택이 할당된 페이지 범위를 넘어 다른 페이지로 침범하게 되면
 	이 magic 값이 덮어써지게 되고, 커널은 이후 검사 과정에서 이를 감지해 스택 오버플로우 발생 사실을 알 수 있음
-
+// TODO : init_task 특별대우?
 	init_task와 예외적인 수동 호출
 	init_task는 커널 부팅 시점에 이미 정적으로 존재하는 최초의 태스크(PID 0)로 일반적인 태스크 생성 경로를 거치지 않음
 	일반 태스크들은 생성 과정에서 커널 스택이 페이지 단위로 할당될 때 자동으로 set_task_stack_end_magic()가 호출지만 init_task는 이러한 자동 경로를 타지 않음
@@ -1042,7 +1042,7 @@ void start_kernel(void) //시작
 	하드웨어 CPU ID 읽기 (MPIDR)
 	부트 CPU의 logical id = 0으로 매핑
 	부트 CPU의 percpu 오프셋을 0으로 확정(초기 hang 방지)
-
+// TODO : 
 	SMP란 무엇인가
 	SMP(Symmetric Multi-Processing)는 여러 개의 CPU가 동등한 권한으로 하나의 커널을 공유하며 실행되는 구조를 의미
 	SMP 환경에서는 모든 CPU가 동일한 커널 코드를 실행할 수 있고, 인터럽트 처리, 시스템 콜 처리, 스케줄링에 모두 참여 가능
@@ -1146,6 +1146,7 @@ void start_kernel(void) //시작
 	추적 대상 객체의 주소, 현재 생명주기 상태, 해당 객체 타입의 규칙, 리스트 연결용 hlist_node 등을 가짐
 
 	해시 테이블(obj_hash[])
+	// TODO : 같은 해시값 충돌
 	debugobjects는 객체 주소를 빠르게 찾기 위해 해시 테이블을 사용.
 	빠른 이유는 찾을 위치를 미리 계산해서 바로 점프하기 때문에 비교 기반 탐색 구조(리스트, 트리 등)보다 평균적으로 훨씬 빠르다.
 	객체 주소 → 해시 함수 → 버킷 인덱스
@@ -1303,7 +1304,7 @@ void start_kernel(void) //시작
 	 */
 	boot_cpu_init();
 	page_address_init();
-	pr_notice("%s", linux_banner);
+	pr_notice("%s", linux_banner); //
 	setup_arch(&command_line);
 	/* Static keys and static calls are needed by LSMs */
 	jump_label_init();

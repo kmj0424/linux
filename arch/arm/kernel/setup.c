@@ -602,7 +602,7 @@ void __init smp_setup_processor_id(void) // smp_setup_processor_id
 	is_smp() : SMP(멀티코어) 환경이면 true.
 	*/
 	u32 cpu = MPIDR_AFFINITY_LEVEL(mpidr, 0); // 그 값에서 level 0(core ID)를 가져와서 cpu에 저장
-
+// TODO : cpu_logical_map(0) = cpu; set_my_cpu_offset(0); -> 용도? 왜 여기서? 특별대우?
 	cpu_logical_map(0) = cpu; // 논리 CPU 번호와 물리 CPU ID 매핑
 	for (i = 1; i < nr_cpu_ids; ++i)
 		cpu_logical_map(i) = i == cpu ? 0 : i;
