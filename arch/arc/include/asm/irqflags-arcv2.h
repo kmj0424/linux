@@ -88,7 +88,7 @@ static inline void arch_local_irq_enable(void)
 /*
  * Unconditionally Disable IRQs
  */
-static inline void arch_local_irq_disable(void)
+static inline void arch_local_irq_disable(void) // arch_local_irq_disable
 {
 	__asm__ __volatile__("	clri	\n" : : : "memory");
 }
