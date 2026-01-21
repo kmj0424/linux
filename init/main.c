@@ -1320,7 +1320,7 @@ void start_kernel(void) //시작
 	 */
 	boot_cpu_init();
 	page_address_init();
-	pr_notice("%s", linux_banner); //
+	pr_notice("%s", linux_banner); // 커널 로그에 리눅스 배너 문자열(linux_banner)을 NOTICE 레벨로 출력하는 코드
 	setup_arch(&command_line);
 	/* Static keys and static calls are needed by LSMs */
 	jump_label_init();

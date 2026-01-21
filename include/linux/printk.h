@@ -571,8 +571,12 @@ struct pi_entry {
  * This macro expands to a printk with KERN_NOTICE loglevel. It uses pr_fmt() to
  * generate the format string.
  */
-#define pr_notice(fmt, ...) \
-	printk(KERN_NOTICE pr_fmt(fmt), ##__VA_ARGS__)
+#define pr_notice(fmt, ...) \ /*NOTICE 레벨의 커널 로그를 출력하기 위한 printk() 래퍼 매크로
+가변 인자 매크로, fmt : 포맷 문자열, ... : 추가 인자들 (cpu, pid, 포인터 등)*/
+	printk(KERN_NOTICE pr_fmt(fmt), ##__VA_ARGS__) // 커널의 최종 로그 출력 함수
+	/* KERN_NOTICE : 문자열 매크로, 로그 우선순위(priority) 를 문자열 앞에 붙이는 방식
+	pr_fmt(fmt) : 로그에 모듈/서브시스템 이름 자동 접두사를 붙이기 위한 장치
+	##__VA_ARGS__ : C 전처리기의 트릭, 가변 인자가 없을 때도 컴파일 에러가 나지 않게 해줌 */
 /**
  * pr_info - Print an info-level message
  * @fmt: format string
