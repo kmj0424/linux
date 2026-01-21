@@ -1304,8 +1304,14 @@ void start_kernel(void) //시작
 	자원은 루트에서 내려오는 게 아니라 허용 여부를 위로 확인하는 구조
 	*/
 	cgroup_init_early();
-
+	/*
+	목적 : 현재 CPU에서 실행 중인 코드가 인터럽트에 의해 중단·침범되지 않도록 보장하기 위해서 인터럽트를 비활성화하는 매크로
+	*/
 	local_irq_disable();
+	/*
+	아직 인터럽트 없는 부팅 초반 구간이다를 커널 전체에 선언하는 상태 플래그
+	irq 관련 API나 락 코드들이 early boot 특수 상황을 고려해 동작하도록 돕는다.
+	*/
 	early_boot_irqs_disabled = true;
 
 	/*

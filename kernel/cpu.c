@@ -3160,6 +3160,9 @@ void set_cpu_possible(unsigned int cpu, bool possible)
 
 /*
  * Activate the first processor.
+현재 실행 중인 CPU를 부트 CPU로 확정하고,
+CPU 0(또는 그에 해당하는 logical CPU)을 커널의 모든 CPU 상태 마스크에 등록하며,
+SMP 환경에서는 그 CPU를 전역 부트 CPU ID로 기록하는 함수
  */
 void __init boot_cpu_init(void)
 {
