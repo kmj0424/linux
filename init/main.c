@@ -1317,8 +1317,11 @@ void start_kernel(void) //시작
 	/*
 	 * Interrupts are still disabled. Do necessary setups, then
 	 * enable them.
+	 * 현재 실행 중인 CPU(=부팅 CPU)를 커널의 CPU 관리 모델에 등
 	 */
 	boot_cpu_init();
+	/* page → (커널) 가상주소를 빠르게 찾기 위한 page_address 해시 테이블을 초기화해서,
+	나중에 highmem/특수 매핑 페이지들의 주소 역참조를 안전하게 지원할 기반을 깔아두는 것. */
 	page_address_init();
 	pr_notice("%s", linux_banner); // 커널 로그에 리눅스 배너 문자열(linux_banner)을 NOTICE 레벨로 출력하는 코드
 	setup_arch(&command_line);
