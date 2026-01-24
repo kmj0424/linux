@@ -1092,6 +1092,13 @@ void start_kernel(void) //시작
 	이 함수는 이 전제를 코드 차원에서 확정짓는 역할을 하며, 이후 다른 CPU들은 secondary CPU로 취급되어 별도의 초기화 경로를 탐.
 
 // TODO : cpu_logical_map(0) = cpu; set_my_cpu_offset(0); -> 용도? 왜 여기서? 특별대우?
+	per-CPU 변수/오프셋의 부팅 초반 최소 보장
+	per-CPU 변수는 CPU마다 독립 값을 가지며, 접근은 per-CPU base + 현재 CPU의 offset으로 이뤄진다.
+	부팅 극초반에는 percpu 메모리/매핑이 완전히 준비되기 전이라도, 이후 초기화 코드(디버그/로그/초기 서브시스템)에서 this_cpu_* 같은 per-CPU 접근이 발생할 수 있다.
+	그래서 smp_setup_processor_id()에서 부트 CPU를 logical CPU0에 매핑(cpu_logical_map(0)=cpu)하고,
+	현재 CPU의 per-CPU offset을 0으로 고정(set_my_cpu_offset(0))해 per-CPU 접근이 최소한 안전하게 동작하도록 만든다.
+	이는 아직 CPU가 하나(부트 CPU)만 존재한다는 전제 하에서 early boot 경로가 깨지지 않게 하는 특별 초기 처리다.
+
 	per-CPU 변수와 초기 오프셋 설정
 	per-CPU 변수는 CPU마다 독립적인 값을 가지는 커널 데이터.
 	내부적으로는 per-CPU 베이스 주소 + CPU별 오프셋 방식으로 접근.
@@ -1158,7 +1165,8 @@ void start_kernel(void) //시작
 	// TODO : 같은 해시값 충돌
 	같은 해시값으로 충돌하면, 그 버킷 안의 hlist를 순회해서 주소를 직접 비교
 	debugobjects는 객체 주소를 빠르게 찾기 위해 해시 테이블을 사용.
-	빠른 이유는 찾을 위치를 미리 계산해서 바로 점프하기 때문에 비교 기반 탐색 구조(리스트, 트리 등)보다 평균적으로 훨씬 빠르다.
+	빠른 이유는 키에 해시 함수를 적용해 접근할 버킷 인덱스를 계산하고, 그 결과에 해당하는 메모리 위치에 직접 접근함으로써
+	비교를 반복하는 탐색 과정을 거치지 않기 때문에 비교 기반 탐색 구조보다 평균적으로 훨씬 빠르다.
 	객체 주소 → 해시 함수 → 버킷 인덱스
 	각 버킷은 raw_spinlock, hlist_head를 가짐
 	버킷 안의 hlist에는 현재 추적 중인 객체들의 debug_obj 메타데이터가 연결되어 있다.

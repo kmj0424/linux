@@ -596,13 +596,16 @@ u32 __cpu_logical_map[NR_CPUS] = { [0 ... NR_CPUS-1] = MPIDR_INVALID };
 void __init smp_setup_processor_id(void) // smp_setup_processor_id
 {
 	int i;
-	u32 mpidr = is_smp() ? read_cpuid_mpidr() & MPIDR_HWID_BITMASK : 0; // 현재 코어 id 뽑기 #define u32 unsigned int
 	/*
 	mpidr 멀티 프로세서 id 레지스터 (Multiprocessor Affinity Register) cpu id 저장돼있는 레지스터?
 	is_smp() : SMP(멀티코어) 환경이면 true.
+	SMP면 하드웨어 CPU ID를 읽고, 아니면 CPU 0 하나만 있다고 가정
 	*/
+	u32 mpidr = is_smp() ? read_cpuid_mpidr() & MPIDR_HWID_BITMASK : 0; // 현재 코어 id 뽑기 #define u32 unsigned int
 	u32 cpu = MPIDR_AFFINITY_LEVEL(mpidr, 0); // 그 값에서 level 0(core ID)를 가져와서 cpu에 저장
 	cpu_logical_map(0) = cpu; // 논리 CPU 번호와 물리 CPU ID 매핑
+	/* 이 반복문은 부트 CPU를 논리 CPU 0으로 고정한 뒤, 나머지 논리 CPU 슬롯들을 임시로 일관된 상태로 채워
+	부팅 초반 코드들이 안전하게 CPU 매핑을 참조할 수 있도록 한다. */
 	for (i = 1; i < nr_cpu_ids; ++i)
 		cpu_logical_map(i) = i == cpu ? 0 : i;
 
