@@ -3133,11 +3133,29 @@ void set_cpu_online(unsigned int cpu, bool online)
 	 * Note, that the fact that __num_online_cpus is of type atomic_t
 	 * does not protect readers which are not serialized against
 	 * concurrent hotplug operations.
+	 * 
+	 * __cpu_online_maskn : 각 CPU가 online인지 나타내는 비트맵(cpumask)
+	 * 예: CPU 3 online이면 mask의 3번 비트가 1
+	 * __num_online_cpus : online CPU의 총 개수 카운터
+	 * atomic_t로 관리
+	 * 
+	 * atomic_inc/dec가 필요한 이유
+	 * reboot/kexec 코드가 CPU를 내릴 때, IPI/NMI 브로드캐스트 컨텍스트에서 이 함수를 호출하는 끔찍한 남용이 있음
+	 * 그래서 증가/감소는 atomic이 아니면 망가질 수 있음
+	 * 
+	 * atomic은 값 업데이트의 원자성만 보장, 전체 상태의 스냅샷 일관성은 별도 직렬화가 필요
 	 */
 	if (online) {
+		/* cpumask_test_and_set_cpu : cpu 비트를 1로 set하면서 원래 그 비트가 1이었는지 0이었는지를 반환
+		원래 0이었으면 → set 후 1이 되고, 반환은 0
+		원래 1이었으면 → 그대로 1, 반환은 1
+		중복 set(online을 또 online으로)해도 count가 계속 증가하는 버그를 방지 */
 		if (!cpumask_test_and_set_cpu(cpu, &__cpu_online_mask))
 			atomic_inc(&__num_online_cpus);
 	} else {
+		/* cpumask_test_and_clear_cpu : cpu 비트를 0으로 clear하면서 원래 그 비트가 1이었는지 0이었는지를 반환
+		원래 online(1)이었을 때만 카운터를 -1, 이미 offline(0)이면 중복 호출이므로 count는 건드리지 않음
+		중복 clear(offlining을 또 offlining)해도 count가 계속 감소하는 버그를 방지 */
 		if (cpumask_test_and_clear_cpu(cpu, &__cpu_online_mask))
 			atomic_dec(&__num_online_cpus);
 	}
@@ -3160,16 +3178,21 @@ void set_cpu_possible(unsigned int cpu, bool possible)
 
 /*
  * Activate the first processor.
+현재 실행 중인 CPU를 부트 CPU로 확정하고,
+CPU 0(또는 그에 해당하는 logical CPU)을 커널의 모든 CPU 상태 마스크에 등록하며,
+SMP 환경에서는 그 CPU를 전역 부트 CPU ID로 기록하는 함수
  */
 void __init boot_cpu_init(void)
 {
+	/* smp_processor_id() : 지금 이 코드를 실행 중인 CPU의 logical ID */
 	int cpu = smp_processor_id();
 
 	/* Mark the boot cpu "present", "online" etc for SMP and UP case */
-	set_cpu_online(cpu, true);
-	set_cpu_active(cpu, true);
-	set_cpu_present(cpu, true);
-	set_cpu_possible(cpu, true);
+	set_cpu_online(cpu, true); // 이 CPU는 사용 가능 후보, hotplug 관점의 최상위 개념
+	set_cpu_active(cpu, true); // 이 CPU는 물리적으로 존재, 실제 하드웨어 CPU임을 의미
+	set_cpu_present(cpu, true); // 이 CPU는 스케줄링에 참여 가능, cpuset / scheduler 기준
+	set_cpu_possible(cpu, true); // 이 CPU는 현재 실행 중, 태스크를 실제로 실행할 수 있음
+	// 이 CPU는 존재하고, 쓸 수 있고, 지금 켜져 있으며, 일을 한다
 
 #ifdef CONFIG_SMP
 	__boot_cpu_id = cpu;

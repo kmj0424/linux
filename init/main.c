@@ -989,6 +989,14 @@ void start_kernel(void) //시작
 	만약 커널 스택이 할당된 페이지 범위를 넘어 다른 페이지로 침범하게 되면
 	이 magic 값이 덮어써지게 되고, 커널은 이후 검사 과정에서 이를 감지해 스택 오버플로우 발생 사실을 알 수 있음
 
+// TODO : init_task 특별대우?
+	init_task는 커널 부팅 시 이미 존재하는 최초의 태스크(PID 0)
+	커널은 항상 실행 중인 태스크(current)가 있다고 가정하므로, init_task는 실행의 출발점 역할
+	init_task는 커널 스택을 제공해 부팅 초기 함수 호출과 인터럽트 처리를 가능하게 함
+	모든 사용자 프로세스(PID 1 포함)는 init_task로부터 파생
+	PID 1은 고아 프로세스 회수
+	정적 태스크이기 때문에 일반 태스크 생성 경로를 타지 않아 수동 초기화 등 특별대우가 필요
+
 	init_task와 예외적인 수동 호출
 	init_task는 커널 부팅 시점에 이미 정적으로 존재하는 최초의 태스크(PID 0)로 일반적인 태스크 생성 경로를 거치지 않음
 	일반 태스크들은 생성 과정에서 커널 스택이 페이지 단위로 할당될 때 자동으로 set_task_stack_end_magic()가 호출지만 init_task는 이러한 자동 경로를 타지 않음
@@ -1083,6 +1091,14 @@ void start_kernel(void) //시작
 	예를 들어 초기 스케줄링, CPU 마스크 구성, per-CPU 데이터 초기화, 디버그 코드들은 CPU 0이 이미 존재하고 실행 중이라는 전제를 사용.
 	이 함수는 이 전제를 코드 차원에서 확정짓는 역할을 하며, 이후 다른 CPU들은 secondary CPU로 취급되어 별도의 초기화 경로를 탐.
 
+// TODO : cpu_logical_map(0) = cpu; set_my_cpu_offset(0); -> 용도? 왜 여기서? 특별대우?
+	per-CPU 변수/오프셋의 부팅 초반 최소 보장
+	per-CPU 변수는 CPU마다 독립 값을 가지며, 접근은 per-CPU base + 현재 CPU의 offset으로 이뤄진다.
+	부팅 극초반에는 percpu 메모리/매핑이 완전히 준비되기 전이라도, 이후 초기화 코드(디버그/로그/초기 서브시스템)에서 this_cpu_* 같은 per-CPU 접근이 발생할 수 있다.
+	그래서 smp_setup_processor_id()에서 부트 CPU를 logical CPU0에 매핑(cpu_logical_map(0)=cpu)하고,
+	현재 CPU의 per-CPU offset을 0으로 고정(set_my_cpu_offset(0))해 per-CPU 접근이 최소한 안전하게 동작하도록 만든다.
+	이는 아직 CPU가 하나(부트 CPU)만 존재한다는 전제 하에서 early boot 경로가 깨지지 않게 하는 특별 초기 처리다.
+
 	per-CPU 변수와 초기 오프셋 설정
 	per-CPU 변수는 CPU마다 독립적인 값을 가지는 커널 데이터.
 	내부적으로는 per-CPU 베이스 주소 + CPU별 오프셋 방식으로 접근.
@@ -1146,8 +1162,11 @@ void start_kernel(void) //시작
 	추적 대상 객체의 주소, 현재 생명주기 상태, 해당 객체 타입의 규칙, 리스트 연결용 hlist_node 등을 가짐
 
 	해시 테이블(obj_hash[])
+	// TODO : 같은 해시값 충돌
+	같은 해시값으로 충돌하면, 그 버킷 안의 hlist를 순회해서 주소를 직접 비교
 	debugobjects는 객체 주소를 빠르게 찾기 위해 해시 테이블을 사용.
-	빠른 이유는 찾을 위치를 미리 계산해서 바로 점프하기 때문에 비교 기반 탐색 구조(리스트, 트리 등)보다 평균적으로 훨씬 빠르다.
+	빠른 이유는 키에 해시 함수를 적용해 접근할 버킷 인덱스를 계산하고, 그 결과에 해당하는 메모리 위치에 직접 접근함으로써
+	비교를 반복하는 탐색 과정을 거치지 않기 때문에 비교 기반 탐색 구조보다 평균적으로 훨씬 빠르다.
 	객체 주소 → 해시 함수 → 버킷 인덱스
 	각 버킷은 raw_spinlock, hlist_head를 가짐
 	버킷 안의 hlist에는 현재 추적 중인 객체들의 debug_obj 메타데이터가 연결되어 있다.
@@ -1293,17 +1312,26 @@ void start_kernel(void) //시작
 	자원은 루트에서 내려오는 게 아니라 허용 여부를 위로 확인하는 구조
 	*/
 	cgroup_init_early();
-
+	/*
+	목적 : 현재 CPU에서 실행 중인 코드가 인터럽트에 의해 중단·침범되지 않도록 보장하기 위해서 인터럽트를 비활성화하는 매크로
+	*/
 	local_irq_disable();
+	/*
+	아직 인터럽트 없는 부팅 초반 구간이다를 커널 전체에 선언하는 상태 플래그
+	irq 관련 API나 락 코드들이 early boot 특수 상황을 고려해 동작하도록 돕는다.
+	*/
 	early_boot_irqs_disabled = true;
 
 	/*
 	 * Interrupts are still disabled. Do necessary setups, then
 	 * enable them.
+	 * 현재 실행 중인 CPU(=부팅 CPU)를 커널의 CPU 관리 모델에 등
 	 */
 	boot_cpu_init();
+	/* page → (커널) 가상주소를 빠르게 찾기 위한 page_address 해시 테이블을 초기화해서,
+	나중에 highmem/특수 매핑 페이지들의 주소 역참조를 안전하게 지원할 기반을 깔아두는 것. */
 	page_address_init();
-	pr_notice("%s", linux_banner);
+	pr_notice("%s", linux_banner); // 커널 로그에 리눅스 배너 문자열(linux_banner)을 NOTICE 레벨로 출력하는 코드
 	setup_arch(&command_line);
 	/* Static keys and static calls are needed by LSMs */
 	jump_label_init();

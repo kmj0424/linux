@@ -50,7 +50,10 @@ static inline void arch_local_irq_enable(void)
 
 static inline void arch_local_irq_restore(unsigned long flags)
 {
-	barrier();
+	barrier(); // 컴파일러 최적화 방지용 메모리 장벽, 이 줄 앞뒤 코드 순서 바꾸지 마라, IRQ 상태를 바꾸기 전에 이전 코드들이 인터럽트 상태 변경보다 뒤로 밀리지 않게
+	/* CPU의 인터럽트 우선순위 레벨(IPL)을 flags 값으로 설정
+	인터럽트 허용 상태 → 다시 허용, 인터럽트 차단 상태 → 계속 차단
+	아키텍처마다 다르지만 보통은 상태 레지스터, 인터럽트 마스크 레지스터, PSR / SR / CPSR 같은 레지스터 중 하나를 직접 건드림. */
 	setipl(flags);
 	barrier();
 }

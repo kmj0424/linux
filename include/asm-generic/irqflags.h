@@ -52,6 +52,13 @@ static inline void arch_local_irq_enable(void)
 #ifndef arch_local_irq_disable
 static inline void arch_local_irq_disable(void)
 {
+	/*
+	ARCH_IRQ_DISABLED : 인터럽트가 꺼진 상태를 의미하는 상수
+
+	arch_local_irq_restore() : 아키텍처별 인터럽트 상태 복원 함수
+	
+	인자로 받은 인터럽트 상태 값을 현재 CPU에 그대로 다시 설정
+	*/
 	arch_local_irq_restore(ARCH_IRQ_DISABLED);
 }
 #endif

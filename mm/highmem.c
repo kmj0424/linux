@@ -815,10 +815,26 @@ void set_page_address(struct page *page, void *virtual)
 void __init page_address_init(void)
 {
 	int i;
+/*
+highmem page는 항상 고정 매핑이 아니라 kmap() 될 때만 주소가 생기고
+그 주소를 page_address()가 돌려주려면 현재 매핑 주소가 뭔지 저장하는 구조가 있어야 함
+그 저장 구조가 page_address_htable이고, 그걸 부팅 초기에 깨끗하게 세팅하는 게 page_address_init().
 
-	for (i = 0; i < ARRAY_SIZE(page_address_htable); i++) {
-		INIT_LIST_HEAD(&page_address_htable[i].lh);
-		spin_lock_init(&page_address_htable[i].lock);
+page_address_htable[] : 해시 테이블의 버킷 배열
+lh : 이 버킷에 들어있는 엔트리들을 연결하는 리스트 헤드
+lock : 이 버킷을 보호하는 스핀락
+ARRAY_SIZE(x) : 배열 원소 개수(버킷 개수)
+
+INIT_LIST_HEAD()는 lh.next = &lh, lh.prev = &lh로 만들어서 비어있는 원형 리스트 상태
+-> 안하면 나중에 엔트리를 추가할 때 리스트 포인터가 쓰레기값이라 터짐
+
+버킷마다 락이 따로 있는 이유
+전역 락 1개면 모든 CPU가 page_address 테이블 접근할 때마다 한 곳에서 막힘(병목)
+버킷 락이면 서로 다른 버킷 접근은 병렬로 가능
+*/
+	for (i = 0; i < ARRAY_SIZE(page_address_htable); i++) { // 모든 버킷을 하나씩 초기화
+		INIT_LIST_HEAD(&page_address_htable[i].lh); // 각 버킷의 리스트를 빈 리스트로 초기화
+		spin_lock_init(&page_address_htable[i].lock); // 각 버킷 락을 초기화
 	}
 }
 

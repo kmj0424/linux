@@ -54,7 +54,20 @@ static inline void setup_thread_stack(struct task_struct *p, struct task_struct 
  * Beyond that position, we corrupt data on the next page.
  */
 static inline unsigned long *end_of_stack(const struct task_struct *p) // end_of_stack 여기
-{
+{ // TODO : inline, stack, ifdef?if?
+	/*
+	inline : 함수 호출이 아니라 코드 삽입으로 처리해도 되는 함수, 코드 조각처럼
+	주소 없어도 되고, 호출 안해도 되고, 문법적으로만 함수
+	이 코드는 독립된 함수로 존재할 필요가 없고, 호출이라는 개념 없이 현재 위칭[ 직접 삽입될 수 있다
+	
+	아키텍쳐별로 스택이 쌓이는 방향은 이미 결정되어있음
+
+	#ifdef는 컴파일 전에 판단
+	정의돼 있으면 이 줄을 소스 코드에 남김
+	정의 안 돼 있으면 이 줄을 아예 지워버림
+	if는 실행 중에 판단
+	코드 항상 존재, 컴파일됨, 실행 중에 조건 검사, 분기(branch) 발생 -> CPU가 판단
+	*/
 #ifdef CONFIG_STACK_GROWSUP // 스택이 위로 쌓임 낮은 주소 -> 높은 주소 스택의 끝
 	return (unsigned long *)((unsigned long)task_thread_info(p) + THREAD_SIZE) - 1;
 #else // 스택이 아래로 쌓임 높은 주소 -> 낮은 주소 thread_info 전

@@ -58,8 +58,31 @@ static inline unsigned long arch_local_irq_save(void)
 	return flags;
 }
 
-static inline void arch_local_irq_restore(unsigned long flags)
+static inline void arch_local_irq_restore(unsigned long flags) // arch_local_irq_restore
 {
+	/*
+	static inline : 호출되지 않고 호출 위치에 코드가 직접 삽입
+	flags : 이전에 저장해 둔 CPU 상태 값
+	보통 arch_local_irq_save()에서 얻은 값
+	flags에 저장돼 있던 CPU 상태 값을 현재 CPU의 상태 레지스터(SR)에 그대로 복원
+
+	movew : word(16비트) 이동 명령
+	%0 : 첫 번째 입력 오퍼랜드 (flags)
+	%%sr : CPU 상태 레지스터(Status Register)
+	flags 값을 SR 레지스터에 직접 쓰기
+
+	"d" : 데이터 레지스터에 넣어서 전달
+	(flags) : C 변수 flags
+	flags 값을 데이터 레지스터에 넣어서 사용해라
+	
+	volatile : 이 명령을 절대 제거하거나 이동하지 마라
+	CPU 상태를 바꾸는 명령이므로 최적화 금지
+	
+	"memory" : 이 명령은 메모리 상태에 영향을 줄 수 있다
+	이 명령 앞뒤로 메모리 접근 재배치 금지
+
+	
+	*/
 	asm volatile ("movew %0,%%sr" : : "d" (flags) : "memory");
 }
 
