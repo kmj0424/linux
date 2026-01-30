@@ -703,49 +703,78 @@ struct proc_info_list *lookup_processor(u32 midr)
 	return list;
 }
 
-static void __init setup_processor(void)
+static void __init setup_processor(void) // setup_processor
 {
-	unsigned int midr = read_cpuid_id();
-	struct proc_info_list *list = lookup_processor(midr);
+	unsigned int midr = read_cpuid_id(); // 어떤 코어에서 실행 중인지의 고유 식별자 읽어오기
+	struct proc_info_list *list = lookup_processor(midr); // midr를 키로 해서 커널에 미리 등록된 CPU 지원 테이블에서 해당 CPU에 맞는 항목(proc_info_list)을 찾음
 
-	cpu_name = list->cpu_name;
-	__cpu_architecture = __get_cpu_architecture();
+	cpu_name = list->cpu_name; // 커널이 로그/정보 표시할 때 쓰는 CPU 이름 문자열 설정
+	__cpu_architecture = __get_cpu_architecture(); // 이 CPU가 ARMv몇인지(대략적인 아키텍처 레벨)를 판별
 
-	init_proc_vtable(list->proc);
-#ifdef MULTI_TLB
-	cpu_tlb = *list->tlb;
+	init_proc_vtable(list->proc); // list->proc에 들어있는 CPU별 함수 포인터 테이블을 전역 proc vtable로 세팅
+#ifdef MULTI_TLB // MULTI_* 설정이면 CPU별 테이블 복사해두기
+	cpu_tlb = *list->tlb; // TLB 관련 연산(flush 루틴등) 묶음을 cpu_tlb 전역에 세팅
 #endif
 #ifdef MULTI_USER
-	cpu_user = *list->user;
+	cpu_user = *list->user; // user space 복사/접근(copy_to_user/copy_from_user 계열)에서 CPU별 최적 루틴을 선택하기 위해 세팅.
 #endif
 #ifdef MULTI_CACHE
-	cpu_cache = *list->cache;
+	cpu_cache = *list->cache; // cache 관리 함수들(클린/무효화 등)을 CPU별 구현으로 세팅
 #endif
-
+	/* 부팅 로그에 CPU 정보 출력
+	list->cpu_name: 이름
+	midr: raw MIDR 값
+	midr & 15: MIDR 하위 비트로 revision(리비전) 뽑는 전형적인 방식
+	proc_arch[cpu_architecture()]: ARMv7/ARMv8… 같은 표시를 위한 문자열
+	get_cr(): 보통 CP15 Control Register(CR) 값 읽어서 현재 제어레지스터 상태 출력*/
 	pr_info("CPU: %s [%08x] revision %d (ARMv%s), cr=%08lx\n",
 		list->cpu_name, midr, midr & 15,
 		proc_arch[cpu_architecture()], get_cr());
-
+	/* UTS machine 문자열 설정 (uname -m 출력값)
+	init_utsname()->machine : 현재 커널의 UTS 정보 구조체(struct new_utsname) 내 machine 필드, 유저 공간에서 uname 시스템콜로 노출되는 아키텍처 문자열
+	__NEW_UTS_LEN + 1 :machine 필드의 최대 길이 + 널 종료 문자 공간
+	"%s%c" : 아키텍처 이름 문자열 + 엔디안 문자 1개
+	list->arch_name : proc_info_list에 정의된 CPU 아키텍처 이름 문자열
+	ENDIANNESS : 현재 커널의 엔디안 표현 문자 ('l' 또는 'b') */
 	snprintf(init_utsname()->machine, __NEW_UTS_LEN + 1, "%s%c",
 		 list->arch_name, ENDIANNESS);
+	/* ELF platform 문자열 설정 (auxv의 AT_PLATFORM 값).
+	elf_platform : ELF 실행 시 유저 공간에 전달될 플랫폼 문자열 버퍼
+	ELF_PLATFORM_SIZE : elf_platform 버퍼의 최대 크기
+	"%s%c" : 플랫폼 이름 문자열 + 엔디안 문자 1개
+	list->elf_name : proc_info_list에 정의된 ELF 플랫폼 이름 문자열
+	ENDIANNESS : 현재 커널의 엔디안 표현 문자 */
 	snprintf(elf_platform, ELF_PLATFORM_SIZE, "%s%c",
 		 list->elf_name, ENDIANNESS);
+	/* ELF HWCAP(AT_HWCAP) 초기값 설정.
+	elf_hwcap : 유저 공간에 전달될 하드웨어 capability 비트마스크
+	list->elf_hwcap : 해당 CPU 타입이 기본적으로 지원하는 기능들의 비트셋, proc_info_list에 정적으로 정의된 값 */
 	elf_hwcap = list->elf_hwcap;
-
+	/* CPU feature 레지스터(CPUID 계열)를 읽어 실제 하드웨어가 지원하는 기능을 확인한다.
+	elf_hwcap 및 커널 내부 CPU capability 정보를 레지스터 기반으로 보정/갱신한다.	*/
 	cpuid_init_hwcaps();
+	/* ARM EABI 정수 나눗셈(idiv) 처리 경로 설정.
+	CPU가 하드웨어 division을 지원하는지에 따라 하드웨어/소프트웨어 나눗셈 구현 중 적절한 경로를 선택하거나 패치 */
 	patch_aeabi_idiv();
 
 #ifndef CONFIG_ARM_THUMB
+/* 커널이 THUMB를 지원하지 않는 빌드인 경우, 유저 공간에 THUMB 관련 기능을 광고하지 않도록 HWCAP 비트를 제거
+HWCAP_THUMB : THUMB ISA 지원 여부 표시 비트
+HWCAP_IDIVT : THUMB 환경에서의 정수 나눗셈 capability 비트 */
 	elf_hwcap &= ~(HWCAP_THUMB | HWCAP_IDIVT);
 #endif
 #ifdef CONFIG_MMU
+/* MMU 환경에서 사용할 기본 캐시/메모리 매핑 정책 설정.
+list->__cpu_mm_mmu_flags : 해당 CPU 타입에서 요구되는 MMU/캐시 관련 플래그, proc_info_list에 정의된 CPU별 기본 정책 정보 */
 	init_default_cache_policy(list->__cpu_mm_mmu_flags);
 #endif
-	erratum_a15_798181_init();
+	erratum_a15_798181_init(); // Cortex-A15의 알려진 하드웨어 버그(Erratum 798181)에 대한 워크어라운드 초기화
 
-	elf_hwcap_fixup();
+	elf_hwcap_fixup(); // 지금까지의 결과(테이블값, CPUID 실측, 빌드옵션 마스킹, erratum 영향)를 반영해서 elf_hwcap을 최종 보정
 
-	cacheid_init();
+	cacheid_init(); // 캐시 관련 ID/타입 레지스터를 읽고, 캐시 구조(라인 크기 등)를 커널 내부에 세팅
+	/* 현재 실행 중인 CPU 코어”의 로컬 초기화 최종 단계
+	제어 레지스터(CP15) 설정, 정렬/예외 관련 기본값, 도메인 접근 권한 같은 CPU 동작 기반 세팅 */
 	cpu_init();
 }
 
@@ -1099,13 +1128,24 @@ static struct notifier_block arm_restart_nb = {
 	.priority = 128,
 };
 
-void __init setup_arch(char **cmdline_p)
+void __init setup_arch(char **cmdline_p) // setup_arch
 {
+	/*
+	machine_desc : 보드별 vtable(함수 테이블)
+	이 커널이 지원하는 보드/머신(SoC+보드 조합)들의 메타정보 + 보드별 콜백 함수 묶음
+	name : 머신 이름 (로그/덤프용)
+	restart : 리부트 구현(보드별 리셋 레지스터/워치독)
+	init_early : 아주 이른 보드 초기화 훅
+	smp, smp_init : SMP bring-up(세컨더리 코어 깨우기) 훅
+	reboot_mode : 기본 리부트 모드 정책
+
+	atags_vaddr : 부트로더가 준 __atags_pointer(r2)가 가리키는 곳을 CPU가 접근 가능한 주소로 만든 포인터
+	*/
 	const struct machine_desc *mdesc = NULL;
 	void *atags_vaddr = NULL;
 
-	if (__atags_pointer)
-		atags_vaddr = FDT_VIRT_BASE(__atags_pointer);
+	if (__atags_pointer) // r2  
+		atags_vaddr = FDT_VIRT_BASE(__atags_pointer); // 부트로더가 r2로 준 DTB/ATAGS의 물리주소를 현재 초기 매핑 상태에서 커널이 실제로 읽을 수 있는 가상주소 포인터로 변환
 
 	setup_processor();
 	if (atags_vaddr) {

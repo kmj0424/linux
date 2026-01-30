@@ -1383,15 +1383,41 @@ void start_kernel(void) //시작
 	이 커널이 돌아갈 하드웨어/메모리/CPU/부트 환경이 뭔지를 아키텍처별로 해석해서,
 	메모리 맵, reserved 영역, 커널이 쓸 물리 메모리 범위, CPU/코어 관련 초기 상태(부트 CPU 식별, SMP 준비의 전단계)
 	early 콘솔/디바이스트리(DT) 또는 ACPI 같은 하드웨어 기술의 초기 파싱, 커맨드라인 확정/정리등을 커널 나머지 코드가 믿고 쓸 수 있는 형태로 세팅
+
+	SoC (System on Chip) : CPU + 메모리 컨트롤러 + 인터럽트 컨트롤러 + 타이머 + 주변장치를 하나의 칩에 넣어놓은 것
+	리눅스 커널은 SoC마다 레지스터 주소, 인터럽트 구조, 클럭 구조가 다르다
+
+	DT (Device Tree) : 하드웨어 구성을 코드가 아닌 데이터로 표현한 트리 구조
+	이 시스템에는 이런 CPU가 있고, 메모리는 여기 있고, UART는 이 주소에 있고, 인터럽트는 이렇게 연결돼 있다를 커널에 알려주는 설계도
+
+	DTB (Device Tree Blob) : DT를 컴파일한 바이너리 파일
+
+	FDT (Flattened Device Tree) : DTB의 메모리 상 표현 형식 이름
+
+	ATAGS (ARM Tags) : DT 이전에 쓰던 ARM 전통 부트 파라미터 전달 방식, 메모리에 tag 리스트 형태로 정보 전달
+	ex) 메모리 크기, 커맨드라인, 머신 ID
+
+	부트로더
+	└─ DTB 또는 ATAGS를 메모리에 올림
+	└─ r2 = 그 메모리의 시작 주소
+	└─ 커널 점프
+
+	r0	0 (예약)
+	r1	머신 타입 ID (ATAGS 시대)
+	r2	ATAGS 또는 DTB의 물리 주소
 	*/
 	setup_arch(&command_line);
 	/* Static keys and static calls are needed by LSMs
 	static key(static branch) 인프라를 초기화해서,꺼져 있을 때는 분기/비교 비용 최소로,
-	켜면 즉시 코드 경로가 바뀌게 만드는 런타임 패치 기반 분기 최적화를 가능하게 함. */
+	켜면 즉시 코드 경로가 바뀌게 만드는 런타임 패치 기반 분기 최적화를 가능하게 함.
+	jump_label = static_key가 사용하는 저수준 메커니즘
+	 */
 	jump_label_init();
 	/* static call 인프라 초기화.
 	함수 포인터 호출을 많이 쓰면 간접 호출 비용 + 분기예측 불리 + 보안 완화(스펙터류) 영향이 커지는데,
-	static_call은 간접 호출처럼 유연하게 바꿀 수 있으면서도 실제 실행은 직접 call에 가깝게 되도록 코드를 패치하는 메커니즘.*/
+	static_call은 간접 호출처럼 유연하게 바꿀 수 있으면서도 실제 실행은 직접 call에 가깝게 되도록 코드를 패치하는 메커니즘.
+	커널에 컴파일돼 있는 모든 static call site들을 순회해서 초기 타겟 함수로 실제 기계어 call을 패치하고
+	모듈 로딩 시에도 다시 패치할 수 있게 준비하는 static call 인프라의 부팅 초기화 함수 */
 	static_call_init();
 	/* LSM(Security Modules)과 커널 보안 정책의 부팅 초반 버전을 세팅.
 	어떤 LSM을 쓸지(순서/스태킹 포함) 결정, LSM 훅들이 동작 가능하게 최소 기반 세팅,

@@ -262,9 +262,12 @@ static __always_inline int static_key_count(struct static_key *key)
 	return raw_atomic_read(&key->enabled);
 }
 
-static __always_inline void jump_label_init(void)
+static __always_inline void jump_label_init(void) // jump_label_init
 {
-	static_key_initialized = true;
+	/* __always_inline : 항상 인라인(함수 호출을 없애고, 함수 안의 코드 그대로 쓸 것), 컴파일러한테 선택권 x
+	static_key는 거의 항상 false(또는 true)인 조건을 CPU 분기 비용 없이 처리하기 위한 커널 전용 스위치
+	*/
+	static_key_initialized = true; // static_key / jump_label 인프라가 준비됐다는 신호
 }
 
 static __always_inline void jump_label_init_ro(void) { }

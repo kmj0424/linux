@@ -492,35 +492,59 @@ int static_call_text_reserved(void *start, void *end)
 	return __static_call_mod_text_reserved(start, end);
 }
 
-int __init static_call_init(void)
+int __init static_call_init(void) // static_call_init
 {
 	int ret;
 
-	/* See static_call_force_reinit(). */
+	/* See static_call_force_reinit().
+	static_call_initialized : static call 인프라가 이미 초기화되었는지를 나타내는 전역 상태 변수
+	이미 초기화된 상태라면 중복 초기화를 피하기 위해 바로 반환 */
 	if (static_call_initialized == 1)
 		return 0;
-
+	/* CPU hotplug read lock 획득.
+	CPU hotplug : 실행 중인 커널에서 CPU를 동적으로 online/offline 할 수 있는 기능
+	(예: 전원 관리, CPU 추가/제거, suspend/resume)
+	cpus_read_lock() : CPU hotplug 상태 변경(online/offline)을 일시적으로 막는다
+	read lock이므로 다른 reader는 허용되지만, CPU 상태를 변경하는 writer는 차단
+	static call 사이트 초기화 중 CPU 구성 변화로 인한 코드 패치 불일치를 방지 */
 	cpus_read_lock();
+	/* static call 전용 락 획득.
+	static call 사이트의 코드 패치/초기화 과정에서 다른 static call 업데이트와의 동시 접근을 방지
+	static call은 코드 자체를 수정하므로 동시 접근 시 치명적인 실행 오류가 발생할 수 있다. */
 	static_call_lock();
+	/* vmlinux에 포함된 static call 사이트 초기화 수행.
+	NULL : 커널 본체(vmlinux)에 대한 초기화임을 의미, 모듈 로딩 시에는 module 구조체 포인터가 전달된다
+	__start_static_call_sites : 링커가 생성한 심볼, vmlinux 내 static call site 메타데이터 배열의 시작 주소
+	__stop_static_call_sites : 링커가 생성한 심볼, vmlinux 내 static call site 메타데이터 배열의 끝 주소
+	동작 : static call site 테이블을 순회, 각 site에 대해 필요한 메모리를 할당, 초기 호출 대상에 맞게 코드 패치 수행
+	반환값 : 0 -> 성공, 음수 -> 메모리 할당 실패 등 치명적 오류 */
 	ret = __static_call_init(NULL, __start_static_call_sites,
 				 __stop_static_call_sites);
-	static_call_unlock();
-	cpus_read_unlock();
+	static_call_unlock(); // static call 전용 락 해제, static call 사이트 초기화 및 코드 패치 완료
+	cpus_read_unlock(); // CPU hotplug read lock 해제, static call 초기화 동안 차단했던 CPU online/offline 변경을 다시 허용
 
-	if (ret) {
+	if (ret) { // static call 초기화 실패 처리
 		pr_err("Failed to allocate memory for static_call!\n");
 		BUG();
 	}
-
+/* static_call_initialized : static call 인프라 초기화 상태를 나타내는 전역 변수
+0 : 아직 초기화 전, 1 : 초기화 완료
+!static_call_initialized : notifier를 아직 등록하지 않은 초기화 시점에만 등록하려는 가드(중복 등록 방지)
+register_module_notifier(&static_call_module_nb) :
+register_module_notifier() : 모듈 이벤트(LOAD/UNLOAD 등)를 받을 notifier 블록을 커널 전역 리스트에 등록하는 함수
+&static_call_module_nb : static call 전용 모듈 notifier 블록(전역 변수)
+타입은 보통 struct notifier_block 이며, 내부에 callback 함수 포인터(notifier_call)와 우선순위등을 가진다.
+module notifier : 모듈이 로드되거나 언로드될 때 커널이 등록된 콜백들을 호출하는 알림 메커니즘
+부팅 이후 추가되는 코드/데이터에 대해 필요한 후처리(초기화/패치/정리)를 하게 해줌 */
 #ifdef CONFIG_MODULES
 	if (!static_call_initialized)
 		register_module_notifier(&static_call_module_nb);
 #endif
 
-	static_call_initialized = 1;
+	static_call_initialized = 1; // static call 인프라 초기화 완료
 	return 0;
 }
-early_initcall(static_call_init);
+early_initcall(static_call_init); // 커널 부팅 초기 단계에서 실행되는 initcall 레벨 등록
 
 #ifdef CONFIG_STATIC_CALL_SELFTEST
 
