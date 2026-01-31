@@ -6435,10 +6435,12 @@ static void __init cgroup_init_subsys(struct cgroup_subsys *ss, bool early) // c
  */
 int __init cgroup_init_early(void) // cgroup_init_early
 {
-	/*
+	/* 만들 수 있는가?
 	ctx(cgroup_fs_context) : cgroup 계층(root/hierarchy)을 초기화할 때 필요한 작업 컨텍스트 구조체
 	ctx.root만 채워서 init_cgroup_root()에 전달하는 용도로 사용
-	__initdata : ctx는 부팅 끝나면 데이터도 버릴 수 있도록
+	__initdata : ctx는 부팅 끝나면 데이터도 버릴 수 있도록 ? 어떤 시점까지가 부팅 끝인지, 버려진 이후는?
+// TODO : __initdata 어떻게 구현? 버린다? 컴퓨터입장에서? 왜 여기서 처음? 여기서의 static 이유? static __initdata? 
+// TODO : cgroup_fs_context 없으면 부팅 왜 못하고 이후에 안쓰는지? ctx를 언제까지 쓰는지?
 	*/
 	static struct cgroup_fs_context __initdata ctx;
 	/*

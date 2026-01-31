@@ -70,9 +70,11 @@ static inline unsigned long *end_of_stack(const struct task_struct *p) // end_of
 // TODO : THREAD_SIZE 고정크기인 이유
 	커널 스택은 빠르고 단순하게 계산,접근되어야 하므로, 태스크마다 고정 크기로 잡는다.
 	THREAD_SIZE는 태스크 하나가 커널 모드에서 사용할 커널 스택의 전체 크기를 의미하는 상수
-	ifdef : task_thread_info(p)가 struct thread_info *이므로 +1은 thread_info 구조체 다음을 정확히 의미 → 마지막에 unsigned long *로만 캐스팅
-	else : task_thread_info(p)가 struct thread_info *이므로 +1은 thread_info 구조체 다음을 정확히 의미 → 마지막에 unsigned long *로만 캐스팅
-	*/
+	ifdef : 스택 블록의 상단 경계를 감시해야 하므로, thread_info 기준점에서 THREAD_SIZE 바이트만큼 이동해서 스택 블록의 끝으로 가야 한다.
+	task_thread_info(p)는 struct thread_info * 이라서 task_thread_info(p) + THREAD_SIZE 라고 쓰면 THREAD_SIZE 바이트가 아니라
+	THREAD_SIZE * sizeof(struct thread_info) 바이트만큼 이동해버리므로 주소가 틀어짐
+	그래서 (unsigned long)로 캐스팅해 바이트 단위 주소 연산을 한 뒤, unsigned long *로 다시 캐스팅하고 -1을 해서 블록 내부의 마지막 워드 슬롯을 선택
+	else :  thread_info가 스택 블록의 바닥 쪽에 있고, 침범은 바닥 경계에서 시작하므로, task_thread_info(p) + 1 = thread_info 구조체 바로 다음 주소(경계 바로 안쪽) */
 
 #ifdef CONFIG_STACK_GROWSUP // 스택이 위로 쌓임 낮은 주소 -> 높은 주소 스택의 끝
 	return (unsigned long *)((unsigned long)task_thread_info(p) + THREAD_SIZE) - 1;

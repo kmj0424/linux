@@ -1263,7 +1263,7 @@ void start_kernel(void) //시작
 	builld_id_parse_buf()러 notes를 파싱 후
 	찾은 Build ID를 전역 배열 vmlinux_builld_id에 저장
 	init 이후에는 __ro_after_init로 보호(읽기 전용)
-
+// TODO : note 만든 이유
 	note란 : ELF 파일 안에 들어가는 작은 메타데이터 블록이다(이 바이너리에 대한 설명서 조각 같은 것 / 코드 x, 데이터 x)
 	ELF 파일에는 코드 섹션(.text), 데이터 섹션(.data, .rodata), 심볼 정보, 디버그 정보, note 섹션
 	note 섹션 특징 : 실행 흐름과는 무관, CPU가 실행하지 않음, 툴/커널/디버거가 정보 일기용으로만 사용
