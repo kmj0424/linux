@@ -54,7 +54,7 @@ static inline void setup_thread_stack(struct task_struct *p, struct task_struct 
  * Beyond that position, we corrupt data on the next page.
  */
 static inline unsigned long *end_of_stack(const struct task_struct *p) // end_of_stack 여기
-{ // TODO : inline, stack, ifdef?if?
+{
 	/*
 	inline : 함수 호출이 아니라 코드 삽입으로 처리해도 되는 함수, 코드 조각처럼
 	주소 없어도 되고, 호출 안해도 되고, 문법적으로만 함수
@@ -67,7 +67,13 @@ static inline unsigned long *end_of_stack(const struct task_struct *p) // end_of
 	정의 안 돼 있으면 이 줄을 아예 지워버림
 	if는 실행 중에 판단
 	코드 항상 존재, 컴파일됨, 실행 중에 조건 검사, 분기(branch) 발생 -> CPU가 판단
+// TODO : THREAD_SIZE 고정크기인 이유
+	커널 스택은 빠르고 단순하게 계산,접근되어야 하므로, 태스크마다 고정 크기로 잡는다.
+	THREAD_SIZE는 태스크 하나가 커널 모드에서 사용할 커널 스택의 전체 크기를 의미하는 상수
+	ifdef : task_thread_info(p)가 struct thread_info *이므로 +1은 thread_info 구조체 다음을 정확히 의미 → 마지막에 unsigned long *로만 캐스팅
+	else : task_thread_info(p)가 struct thread_info *이므로 +1은 thread_info 구조체 다음을 정확히 의미 → 마지막에 unsigned long *로만 캐스팅
 	*/
+
 #ifdef CONFIG_STACK_GROWSUP // 스택이 위로 쌓임 낮은 주소 -> 높은 주소 스택의 끝
 	return (unsigned long *)((unsigned long)task_thread_info(p) + THREAD_SIZE) - 1;
 #else // 스택이 아래로 쌓임 높은 주소 -> 낮은 주소 thread_info 전

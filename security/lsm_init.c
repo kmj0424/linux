@@ -380,17 +380,18 @@ void __init security_add_hooks(struct security_hook_list *hooks, int count,
 /**
  * early_security_init - Initialize the early LSMs
  */
-int __init early_security_init(void)
+int __init early_security_init(void) // early_security_init
 {
+	/* lsm_info : LSM 하나당 존재하는 메타데이터 구조체, 이름, 초기화 함수, 상태 플래그, 순서 정보 등을 가짐 */
 	struct lsm_info *lsm;
 
 	/* NOTE: lsm_pr_dbg() doesn't work here as lsm_debug is not yet set */
 
-	lsm_early_for_each_raw(lsm) {
-		lsm_enabled_set(lsm, true);
-		lsm_order_append(lsm, "early");
-		lsm_prepare(lsm);
-		lsm_init_single(lsm);
+	lsm_early_for_each_raw(lsm) { // 등록된 모든 LSM을 하나씩 순회
+		lsm_enabled_set(lsm, true); // LSM을 enabled 상태로 표시, LSM 존재 플래그 ON
+		lsm_order_append(lsm, "early"); // 이 LSM의 실행 순서(order)에 early 태그를 추가, 이 LSM은 early 단계에서 초기화됐다는 기록
+		lsm_prepare(lsm); // LSM 내부에서 초기 준비 작업 내부 (자료구조 초기화, static 변수 세팅, mutex / 리스트 / 캐시 준비 등)
+		lsm_init_single(lsm); // early init 함수 호출 (최소한의 보안 상태 설정, 부팅 초기에 필요한 훅만 등록, 아직 정책 없음 상태로 동작)
 		lsm_count_early++;
 	}
 

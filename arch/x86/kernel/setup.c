@@ -225,7 +225,8 @@ unsigned long saved_video_mode;
 #define RAMDISK_IMAGE_START_MASK	0x07FF
 #define RAMDISK_PROMPT_FLAG		0x8000
 #define RAMDISK_LOAD_FLAG		0x4000
-
+/* 부트로더가 넘긴 커널 커맨드라인을 아키텍처 초기화 전용 버퍼에 한 번 더 복사해 두는 곳
+__initdata : 부팅이 끝나면 메모리에서 날려도 되는 데이터, 아키텍처 초기화 단계에서만 잠깐 쓰는 임시 커맨드라인 버퍼 */
 static char __initdata command_line[COMMAND_LINE_SIZE];
 #ifdef CONFIG_CMDLINE_BOOL
 char builtin_cmdline[COMMAND_LINE_SIZE] = CONFIG_CMDLINE;

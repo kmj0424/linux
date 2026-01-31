@@ -1426,6 +1426,13 @@ void __init debug_objects_early_init(void) // debug_objects_early_init __init �
 	debugobjects가 쓸 수 있는 모든 static 오브젝트를 부트 전용 리스트(pool_boot)에 전부 연결해 둔다.
 	해시 테이블 : 키와 밸류를 매핑한 추상 자료형인 연관 배열을 구현하는 자료구조
 	lockdep은 리눅스 커널에서 잠재적인 데드락(deadlock)을 탐지하고 예측하기 위한 강력한 디버깅 도구
+
+	첫 번째 반복문
+	해시 테이블 obj_hash[]의 각 버킷 락을 raw spinlock으로 초기화
+	early boot에서도 버킷 hlist를 안전하게 조작할 수 있도록 동기화 기반 마련
+	두 번째 반복문
+	정적 debug_obj 배열(obj_static_pool[])의 원소들을 pool_boot free-list(hlist)에 전부 연결
+	early boot에서 사용할 미사용 debug_obj 공급원 준비
 	*/
 	int i;
 
