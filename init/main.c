@@ -265,7 +265,7 @@ static int __init loglevel(char *str)
 early_param("loglevel", loglevel);
 
 #ifdef CONFIG_BLK_DEV_INITRD
-static void * __init get_boot_config_from_initrd(size_t *_size)
+static void * __init get_boot_config_from_initrd(size_t *_size) // get_boot_config_from_initrd
 {
 	u32 size, csum;
 	char *data;
@@ -477,7 +477,7 @@ static void __init exit_boot_config(void)
 
 #else	/* !CONFIG_BOOT_CONFIG */
 
-static void __init setup_boot_config(void)
+static void __init setup_boot_config(void) // setup_boot_config
 {
 	/* Remove bootconfig data from initrd */
 	get_boot_config_from_initrd(NULL);
@@ -972,7 +972,7 @@ void start_kernel(void) //시작
 	따라서 커널 스택이 페이지 경계를 넘어 다른 커널 메모리 페이지를 덮어쓰면, 단순히 해당 태스크만 문제가 되는 것이 아니라 시스템 전체의 무결성이 깨짐
 	이런 손상은 즉시 오류를 발생시키지 않고, 나중에 알 수 없는 시점에서 커널 패닉이나 데이터 손상으로 나타날 수 있기 때문에 매우 위험
 
-// TODO : guard page, 어떻게 페이지를 보호하는가, 페이지 폴트, 코드구현
+	guard page, 어떻게 페이지를 보호하는가, 페이지 폴트, 코드구현
 	Guard page란?
 	Guard page는 스택 끝에 두는 접근 불가능한 페이지로, 스택이 넘치면 즉시 페이지 폴트가 발생하도록 하는 보호 기법이다.
 	주로 사용자 공간 스택에서 사용된다.
@@ -1178,7 +1178,7 @@ void start_kernel(void) //시작
 	obj_static_pool[] 정적 배열에 담겨있음.
 	추적 대상 객체의 주소, 현재 생명주기 상태, 해당 객체 타입의 규칙, 리스트 연결용 hlist_node 등을 가짐
 
-// TODO : 해시테이블 단점
+	해시테이블 단점
 	최악 시간복잡도(O(n)) 가능
 	해시 충돌이 많이 나면 같은 버킷 안 리스트가 길어져서 결국 선형 탐색이 된다. 평균 O(1)이지 항상 O(1)은 아니다.
 	메모리 오버헤드
@@ -1200,7 +1200,7 @@ void start_kernel(void) //시작
 	해시 테이블을 사용함으로써, debugobjects는 평균적으로 O(1) 시간에 객체 상태를 조회할 수 있다.
 	O(1)의 의미는 데이터 개수가 늘어나도 연산 횟수가 거의 늘어나지 않는다
 
-// TODO : hlist 목적, 왜?, 장단점, 버킷
+	hlist 목적, 왜?, 장단점, 버킷
 	hlist 목적
 	해시 버킷에 최적화된 리스트 구조라서 버킷 하나에 여러 항목이 달리는 상황(충돌)을 전제로 설계됨.
 	삭제가 O(1) 이다
@@ -1264,6 +1264,10 @@ void start_kernel(void) //시작
 	찾은 Build ID를 전역 배열 vmlinux_builld_id에 저장
 	init 이후에는 __ro_after_init로 보호(읽기 전용)
 // TODO : note 만든 이유
+	실행에는 직접 필요 없지만, 바이너리의 정체·메타정보를 안전하게 담기 위해 만든 설명용 메타데이터 영역
+	NOTE가 없다면 런타임 수정, 의미 섞임, 포맷 표준화 x, 디버거/툴이 뭔지 알 방법 없음, strip하면 사라짐, 바이너리 식별 불가능
+	빌드/플랫폼/ABI/식별 정보 저장, 실행 로직과 완전히 분리, 바이너리에 관한 설명서 용으로 설계
+	
 	note란 : ELF 파일 안에 들어가는 작은 메타데이터 블록이다(이 바이너리에 대한 설명서 조각 같은 것 / 코드 x, 데이터 x)
 	ELF 파일에는 코드 섹션(.text), 데이터 섹션(.data, .rodata), 심볼 정보, 디버그 정보, note 섹션
 	note 섹션 특징 : 실행 흐름과는 무관, CPU가 실행하지 않음, 툴/커널/디버거가 정보 일기용으로만 사용
@@ -1424,7 +1428,14 @@ void start_kernel(void) //시작
 	커맨드라인/빌드 옵션 기반으로 보안 정책 early 적용(예: 특정 LSM 강제/비활성, lockdown 관련 초기 결정 등)
 	정확한 내부는 커널 버전/설정에 따라 달라지지만 LSM이 제대로 걸리기 전에 생기는 보안 공백을 막는다
 	*/
-	early_security_init(); //
+	early_security_init();
+	/* 부트로더가 넘긴 설정 데이터를 파싱해, 커널이 구조화된 boot configuration을 early boot부터 안정적으로 사용할 수 있게 만드는 초기화 단계
+	boot configuration : 부팅 시 전달되는 설정을 key-value 트리 구조로 파싱해두는 시스템
+	부트로더가 전달한 bootconfig 영역 위치 확인
+	해당 메모리를 안전하게 매핑
+	bootconfig 데이터를 파싱
+	내부 트리/테이블 구조로 변환
+	이후 커널 코드들이 bootconfig API로 접근 가능 */
 	setup_boot_config();
 	setup_command_line(command_line);
 	setup_nr_cpu_ids();

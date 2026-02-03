@@ -67,7 +67,7 @@ static inline unsigned long *end_of_stack(const struct task_struct *p) // end_of
 	정의 안 돼 있으면 이 줄을 아예 지워버림
 	if는 실행 중에 판단
 	코드 항상 존재, 컴파일됨, 실행 중에 조건 검사, 분기(branch) 발생 -> CPU가 판단
-// TODO : THREAD_SIZE 고정크기인 이유
+	THREAD_SIZE 고정크기인 이유
 	커널 스택은 빠르고 단순하게 계산,접근되어야 하므로, 태스크마다 고정 크기로 잡는다.
 	THREAD_SIZE는 태스크 하나가 커널 모드에서 사용할 커널 스택의 전체 크기를 의미하는 상수
 	ifdef : 스택 블록의 상단 경계를 감시해야 하므로, thread_info 기준점에서 THREAD_SIZE 바이트만큼 이동해서 스택 블록의 끝으로 가야 한다.
