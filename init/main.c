@@ -267,6 +267,30 @@ early_param("loglevel", loglevel);
 #ifdef CONFIG_BLK_DEV_INITRD
 static void * __init get_boot_config_from_initrd(size_t *_size) // get_boot_config_from_initrd
 {
+/* initrd(initramfs) 끝에 bootconfig blob이 붙어있으면 찾아서,
+	(1) 무결성(체크섬) 검증하고
+	(2) 그 blob의 시작 주소를 반환하며
+	(3) initrd_end를 앞으로 당겨서 blob을 initrd에서 "잘라내는(제거하는) 함수
+	bootconfig blob?
+	부트로더가 커널에 넘기는 추가 설정 데이터를 initrd(initramfs) 끝에 덧붙여 넣은 덩어리(blob).
+	커널 cmdline(문자열)과 달리, key-value 트리 형태의 설정을 구조화해서 담을 수 있다.
+	이 함수는 initrd 끝부분에 bootconfig blob이 붙어있는지 확인하고,
+	붙어있다면 그 blob의 시작 주소를 찾아 반환하며, 검증 후 initrd에서 잘라낸다.
+	magic(BOOTCONFIG_MAGIC) : 여기 bootconfig가 있음을 표시하는 고정 문자열
+	header(8바이트) : data 길이(size)와 체크섬(csum)이 들어있음 (각 4바이트, little-endian)
+	data : 실제 bootconfig 데이터(파서가 읽을 대상)
+
+	initrd_start : 메모리 상 initrd 시작 물리/가상 주소(arch에 따라 early에 세팅됨)
+	initrd_end : 메모리 상 initrd 끝 주소(보통 끝 바로 다음 주소 개념). 이 함수에서 잘라내기 위해 수정됨
+	size (u32) : bootconfig data의 바이트 길이 (header에서 읽어옴)
+	csum (u32) : bootconfig data의 체크섬 (header에서 읽어옴)
+	data (char*) : 1) initrd_end 근처에서 magic을 찾기 위한 포인터
+		2) found 이후엔 bootconfig data 시작 주소로 재계산된 포인터
+	char*로 두는 이유: 바이트 단위로 -1씩 움직이며(정렬과 무관) 탐색하기 위해서
+	hdr (u32*) : bootconfig header(8바이트)를 u32 배열처럼 읽기 위한 포인터
+		hdr[0] = size, hdr[1] = checksum
+	u32*로 두는 이유 : 4바이트 단위 값 두 개를 한 번에 읽기 편하게 하려고
+	i (int) : GRUB 4바이트 정렬 이슈 때문에 최대 4번(0~3) 검사하는 루프 인덱스 */
 	u32 size, csum;
 	char *data;
 	u32 *hdr;
@@ -274,12 +298,27 @@ static void * __init get_boot_config_from_initrd(size_t *_size) // get_boot_conf
 
 	if (!initrd_end)
 		return NULL;
-
+	/*
+	- initrd_end : initrd(initramfs)가 메모리에 올라가 있는 끝 주소
+	정확히는 initrd 영역의 마지막 바이트 다음 주소(end + 1 개념).
+	- BOOTCONFIG_MAGIC_LEN : bootconfig를 식별하기 위한 매직 문자열(BOOTCONFIG)의 길이(바이트 단위)
+	- data : initrd의 끝에서 BOOTCONFIG_MAGIC_LEN 바이트만큼 앞에 있는 주소를 가리키게 된다.
+	initrd 끝부분에 bootconfig magic이 붙어 있다고 가정했을 때,
+	그 magic이 시작될 것으로 기대되는 첫 번째 검사 위치를 가리킨다. */
 	data = (char *)initrd_end - BOOTCONFIG_MAGIC_LEN;
 	/*
 	 * Since Grub may align the size of initrd to 4, we must
 	 * check the preceding 3 bytes as well.
 	 */
+	/* i : GRUB이 initrd 크기를 4바이트 정렬/패딩할 수 있어서 magic 위치가 최대 3바이트 밀릴 수 있음.
+	그 가능성을 커버하기 위해 0~3까지 총 4번 검사하는 루프 인덱스
+	data : 현재는 BOOTCONFIG_MAGIC이 있을 것 같은 후보 주소를 가리킴.
+	루프가 돌면서 data--로 1바이트씩 앞으로 이동하며 후보 위치를 바꿔가며 검사한다.
+	BOOTCONFIG_MAGIC / BOOTCONFIG_MAGIC_LEN : bootconfig가 붙어있다는 걸 표시하는 고정 매직 문자열과 그 길이.
+	memcmp(data, BOOTCONFIG_MAGIC, BOOTCONFIG_MAGIC_LEN) : data가 가리키는 메모리에서 BOOTCONFIG_MAGIC_LEN 바이트를 읽어
+	BOOTCONFIG_MAGIC 문자열과 동일한지 비교 후 동일하면(0 반환) data는 magic 문자열 시작 주소로 확정
+	goto found : magic을 찾았을 때 아래 found 라벨로 점프하여 header(size/csum) 파싱 단계로 넘어간다.
+	return NULL : 4군데(끝 기준 후보 1개 + 최대 3바이트 앞 후보) 모두 magic이 아니면 initrd 끝에 bootconfig blob이 없다고 판단하고 NULL 반환 */
 	for (i = 0; i < 4; i++) {
 		if (!memcmp(data, BOOTCONFIG_MAGIC, BOOTCONFIG_MAGIC_LEN))
 			goto found;
