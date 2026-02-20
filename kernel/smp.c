@@ -983,8 +983,35 @@ EXPORT_SYMBOL(nr_cpu_ids);
 #endif
 
 /* An arch may set nr_cpu_ids earlier if needed, so this would be redundant */
-void __init setup_nr_cpu_ids(void)
+void __init setup_nr_cpu_ids(void) // setup_nr_cpu_ids
 {
+	/*
+	목적
+	현재 시스템에서 커널이 실제로 다룰 CPU 개수의 상한(= nr_cpu_ids)을 확정한다.
+	이후 for_each_possible_cpu 같은 반복 범위, per-cpu 자료구조 접근 범위가 nr_cpu_ids를 기준으로 돈다.
+	변수/대상 의미
+	cpu_possible_mask :	커널이 가능한 CPU라고 간주하는 CPU 집합(cpumask).
+	비트 i가 1이면 CPU i는 possible 상태(물리적으로 존재 가능/커널이 관리 대상).
+	cpumask_bits(mask) : cpumask 내부의 비트 배열(unsigned long *) 시작 주소를 꺼내오는 매크로.
+	즉 find_last_bit가 읽을 비트맵 메모리 포인터를 만든다.
+	NR_CPUS : 컴파일 타임에 정해진 CPU 최대치(상한).
+	비트맵 탐색에서도 최대 NR_CPUS 비트까지만 보겠다는 경계로 사용된다.
+	find_last_bit(addr, size) :	addr가 가리키는 비트맵에서 0..size-1 범위 중 가장 마지막으로 1이 설정된 비트의 인덱스를 반환한다.
+	(1이 하나도 없으면 보통 size를 반환하는 구현이 많지만, cpu_possible_mask는 최소 boot cpu가 possible로 잡히는 걸 전제로 하는 경우가 일반적)
+	set_nr_cpu_ids(n) :	전역 변수 nr_cpu_ids를 n으로 설정(또는 검증/클램프 포함)하는 헬퍼.
+	nr_cpu_ids는 커널이 CPU 배열/루프에서 사용하는 런타임 상한이다.
+	실행 결과 기준
+	cpumask_bits(cpu_possible_mask)에서 비트맵 포인터를 얻고, 그 비트맵에서 NR_CPUS 범위 내 마지막으로 1인 비트 인덱스를 찾는다.
+	그 인덱스에 +1을 해서, 가능한 CPU의 최대 번호+1 값을 만든다.
+	예)
+	possible CPU가 0,1,2,3 이면 마지막 1 비트는 3 → +1 해서 4
+	possible CPU가 0,2,5 이면 마지막 1 비트는 5 → +1 해서 6
+	즉 nr_cpu_ids는 possible CPU들의 최댓값 인덱스 + 1이 된다.
+	마지막으로 set_nr_cpu_ids(...)를 호출해 nr_cpu_ids를 그 값으로 확정한다.
+	nr_cpu_ids = (cpu_possible_mask에서 가장 큰 CPU 번호) + 1
+	set_nr_cpu_ids : include/linux/cpumask.h
+	find_last_bit : lib/find_bit.c
+	*/
 	set_nr_cpu_ids(find_last_bit(cpumask_bits(cpu_possible_mask), NR_CPUS) + 1);
 }
 

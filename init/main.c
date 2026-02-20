@@ -325,30 +325,70 @@ static void * __init get_boot_config_from_initrd(size_t *_size) // get_boot_conf
 		data--;
 	}
 	return NULL;
-
+/*
+found : C 언어의 라벨(label)
+goto found; 가 실행되면 프로그램 흐름이 이 위치로 이동
+이 지점은 BOOTCONFIG_MAGIC을 찾은 경우에 도달하는 성공 경로 시작점이다.
+magic 확인이 끝났으므로 이제 header(size, csum)를 파싱하는 단계로 넘어간다.
+*/
 found:
+	/*
+	hdr : (u32 *)로 해석되는 bootconfig header의 시작 주소.
+	header는 magic 바로 앞 8바이트에 있고, 4바이트 값 2개(size, csum)로 구성된다.
+	data : 이 시점의 data는 "BOOTCONFIG_MAGIC 문자열 시작 주소"로 확정된 상태.
+	data - 8은 header의 시작 주소가 된다.
+	(u32 *)(data - 8) : header 8바이트를 4바이트 단위로 읽기 위해 u32*로 캐스팅.
+	hdr[0] : little-endian으로 저장된 bootconfig data 길이(size)
+	hdr[1] : little-endian으로 저장된 bootconfig data 체크섬(csum)
+	le32_to_cpu(x) : header가 little-endian 형식이므로, 현재 CPU 엔디안에 맞게 변환해서 값으로 만든다.
+	*/
 	hdr = (u32 *)(data - 8);
 	size = le32_to_cpu(hdr[0]);
 	csum = le32_to_cpu(hdr[1]);
-
+	/*
+	size : header에서 읽은 bootconfig data 길이(바이트 단위)
+	hdr : header 시작 주소(= data - 8)
+	data : 이제부터는 "bootconfig data 시작 주소"로 다시 계산해서 넣는다.
+	data = ((void *)hdr) - size :
+	레이아웃이 [data(size bytes)][header 8B][magic] 이므로
+	header 시작 주소(hdr)에서 size 바이트만큼 뒤로 가면 data 시작 주소가 된다.
+	(void*)로 캐스팅한 이유는 포인터 산술이 타입 단위로 커지는 걸 피하고,
+	size를 바이트로 해석해서 주소를 계산하려는 의도다.
+	*/
 	data = ((void *)hdr) - size;
 	if ((unsigned long)data < initrd_start) {
 		pr_err("bootconfig size %d is greater than initrd size %ld\n",
 			size, initrd_end - initrd_start);
 		return NULL;
 	}
-
+	/*
+	xbc_calc_checksum(data, size) :	bootconfig data 시작 주소(data)부터 size 바이트 구간의 체크섬을 계산해 u32로 반환
+	csum : header에서 읽은 정답 체크섬
+	계산값 != csum : 데이터가 손상되었거나(전송/저장 오류), 우연히 magic만 맞은 오탐이므로 실패 처리
+	pr_err(...) : 체크섬 실패 로그
+	return NULL : 무결성 검증 실패 시 bootconfig를 무시한다.
+	*/
 	if (xbc_calc_checksum(data, size) != csum) {
 		pr_err("bootconfig checksum failed\n");
 		return NULL;
 	}
-
-	/* Remove bootconfig from initramfs/initrd */
+	/* Remove bootconfig from initramfs/initrd
+	initrd_end : initrd 메모리 영역의 끝 주소(end + 1)
+	data : bootconfig data 시작 주소
+	initrd_end = (unsigned long)data :
+		initrd의 끝을 bootconfig data 시작 지점으로 당겨서,
+		initrd 범위에서 [bootconfig data][header][magic]을 잘라내 제거한다.
+		(이후 initramfs를 풀 때 뒤에 붙은 bootconfig가 섞여 들어가는 것을 방지)
+	*/
 	initrd_end = (unsigned long)data;
+	/*
+	size : 호출자가 bootconfig data 크기를 받고 싶을 때 넘기는 out-parameter 포인터
+	if (_size) *_size = size : _size가 NULL이 아니면 호출자에게 size(바이트)를 돌려준다.
+	*/
 	if (_size)
 		*_size = size;
 
-	return data;
+	return data; // 검증 완료된 bootconfig data의 시작 주소를 반환
 }
 #else
 static void * __init get_boot_config_from_initrd(size_t *_size)
@@ -679,26 +719,83 @@ static inline void smp_prepare_cpus(unsigned int maxcpus) { }
  * We also need to store the touched command line since the parameter
  * parsing is performed in place, and we should allow a component to
  * store reference of name/value for future reference.
+ * 이후를 위해 손대지 않은(original) 커맨드라인을 저장해둘 필요가 있다.
+ * 또한 파라미터 파싱이 문자열을 제자리(in place)에서 수정하면서 수행되기 때문에, 수정된(touched) 커맨드라인도 저장해둘 필요가 있다.
+ * 그리고 어떤 컴포넌트는 이후를 위해 name/value(파라미터 이름/값)의 "참조"를 저장할 수도 있으니,
+ * 그 참조가 깨지지 않도록(원본이 변하지 않도록) 안전한 저장본이 필요하다.
  */
-static void __init setup_command_line(char *command_line)
+static void __init setup_command_line(char *command_line) // setup_command_line
 {
+	/*
+	len : 할당/복사에 사용할 전체 문자열 길이 계산용 임시 변수
+	xlen : extra_command_line 길이(바이트). 없으면 0.
+	extra_command_line은 boot_command_line / command_line 앞에 앞부분으로 붙일 문자열.
+	ilen : extra_init_args를 붙일 때 필요한 추가 길이(바이트).
+	extra_init_args가 있으면 " -- " 구분자(4바이트)까지 포함해서 계산한다.
+	*/
 	size_t len, xlen = 0, ilen = 0;
-
+	/*
+	extra_command_line : 부팅 cmdline 앞에 추가로 붙일 문자열 포인터(없으면 NULL)
+	xlen에 들어가는 값 : extra_command_line의 문자 길이(널문자 제외)
+	extra_command_line이 없으면 xlen은 그대로 0
+	*/
 	if (extra_command_line)
 		xlen = strlen(extra_command_line);
+	/*
+	extra_init_args : init 프로세스에게만 추가로 전달할 인자 문자열 포인터(없으면 NULL)
+	extra_init_args = strim(extra_init_args) :
+	extra_init_args 문자열의 앞/뒤 공백을 제거한 정리된 문자열 포인터가 다시 extra_init_args에 저장된다.
+	(주석에는 trailing space라고 되어 있지만 strim은 보통 앞/뒤 공백을 다듬는다)
+	ilen에 들어가는 값 : extra_init_args의 길이 + 4바이트.
+	여기서 4바이트는 " -- " 구분자를 붙이기 위한 공간(문자 4개)이다.
+	(널문자 1개는 아래 len 계산에서 따로 +1로 처리됨)
+	*/
 	if (extra_init_args) {
 		extra_init_args = strim(extra_init_args); /* remove trailing space */
 		ilen = strlen(extra_init_args) + 4; /* for " -- " */
 	}
-
+	/*
+	boot_command_line : 부팅 시 전달된 원본 커맨드라인을 담고 있는 전역 문자열
+	saved_command_line에 저장할 최종 문자열 형태(개념):
+	[extra_command_line][boot_command_line][(선택) " -- " + extra_init_args(+추가 조합)][\0]
+	len에 들어가는 값 : saved_command_line 버퍼에 필요한 전체 크기(바이트).
+	xlen(앞에 붙일 extra) + boot_command_line 길이 + ilen(선택) + 널문자 1
+	*/
 	len = xlen + strlen(boot_command_line) + ilen + 1;
-
+	/*
+	saved_command_line : 저장용 커맨드라인 버퍼 포인터(전역)
+	memblock_alloc_or_panic(len, SMP_CACHE_BYTES) :
+	early boot에서 쓰는 memblock allocator로 len 바이트를 할당하고,
+	SMP_CACHE_BYTES 단위로 정렬해서 반환.
+	할당 실패 시 panic(부팅 중단).
+	saved_command_line에 들어가는 값 : 새로 할당된 메모리 버퍼의 시작 주소
+	*/
 	saved_command_line = memblock_alloc_or_panic(len, SMP_CACHE_BYTES);
-
+	/*
+	command_line : setup_arch 등에서 만들어진 현재 사용 중인 커맨드라인 포인터
+	(이후 파라미터 파싱 과정에서 inplace로 수정될 수 있는 대상)
+	static_command_line에 저장할 최종 문자열 형태(개념):
+	[extra_command_line][command_line][\0]
+	len에 들어가는 값 : static_command_line 버퍼에 필요한 전체 크기.
+	xlen + command_line 길이 + 널문자 1
+	*/
 	len = xlen + strlen(command_line) + 1;
-
+	/*
+	static_command_line : 파싱이 진행되는(수정될 수 있는) command_line의 스냅샷을 저장할 버퍼(전역)
+	static_command_line에 들어가는 값 : 새로 할당된 메모리 버퍼의 시작 주소
+	*/
 	static_command_line = memblock_alloc_or_panic(len, SMP_CACHE_BYTES);
-
+	/*
+	xlen이 0이 아니면 extra_command_line이 존재한다는 뜻.
+	왜 먼저 붙이냐(주석 의미):
+	command line 안에 "--" 같은 대시 구분자가 섞일 수 있는데,
+	init 인자 구분 규칙 때문에 순서가 꼬이지 않도록 extra_command_line을 항상 맨 앞에 둔다.
+	strcpy(saved_command_line, extra_command_line) :
+	saved_command_line 버퍼의 시작부터 extra_command_line 문자열을 복사한다.
+	복사 후 saved_command_line[0..xlen-1]에는 extra 문자열이 들어있고,
+	saved_command_line[xlen]에는 '\0'이 들어있는 상태.
+	strcpy(static_command_line, extra_command_line) : static_command_line도 동일하게 맨 앞에 extra를 복사한다.
+	*/
 	if (xlen) {
 		/*
 		 * We have to put extra_command_line before boot command
@@ -708,9 +805,52 @@ static void __init setup_command_line(char *command_line)
 		strcpy(saved_command_line, extra_command_line);
 		strcpy(static_command_line, extra_command_line);
 	}
+	/*
+	saved_command_line + xlen : saved_command_line 버퍼에서 extra_command_line 바로 뒤 위치(붙여쓰기 시작점)
+	xlen이 0이면 버퍼 시작점과 동일.
+	실행 결과 : saved_command_line에는 [extra_command_line][boot_command_line][\0] 형태가 된다(일단 init 추가 인자 붙이기 전 단계).
+	*/
 	strcpy(saved_command_line + xlen, boot_command_line);
+	/*
+	static_command_line + xlen : static_command_line 버퍼에서 extra_command_line 바로 뒤 위치
+	실행 결과 :	static_command_line에는	[extra_command_line][command_line][\0] 형태가 된다.
+	여기서 static_command_line은 touched cmdline로 불리지만, 실제 파싱이 command_line에서 inplace로 진행되더라도
+	여기 저장된 값은 그 시점의 cmdline 내용을 안전하게 보관하는 역할을 한다.
+	*/
 	strcpy(static_command_line + xlen, command_line);
-
+	/*
+	ilen이 0이 아니면(extra_init_args가 존재하면) saved_command_line에 init 인자 정보를 추가로 붙인다.
+	saved_command_line만 수정하는 이유 : 사용자가 init에 무엇이 전달됐는지 확인할 수 있도록
+	최종적으로 init 인자까지 포함한 참조용 전체 커맨드라인을 만들어 두려는 목적.
+	(static_command_line은 cmdline 자체 스냅샷 성격이라 여기서 initargs를 합치지 않는다)
+	" -- " 구분자 의미:	커널 커맨드라인에서 init에게 전달할 인자를 구분하는 표준 구분자.
+	예 : kernel-args ... -- init-args ...
+	이때 "--" 뒤는 init(사용자 공간)으로 넘어가는 인자로 취급될 수 있다.
+	initargs_offs :	boot_command_line 안에서 init args 구분 지점(오프셋).
+	즉 boot_command_line 중 " -- " 또는 그 근처 위치를 가리키는 인덱스 값(0이면 없음).
+	이 값이 있으면 boot_command_line 자체에도 init args가 이미 포함되어 있었던 상황으로 볼 수 있다.
+	if
+	(initargs_offs) 경로 : boot_command_line에 이미 init args 구간이 존재하므로,
+	saved_command_line에서 그 위치에 extra_init_args를 끼워 넣어
+	최종 순서를 " -- "[bootconfig init-param][cmdline init-param] 형태로 맞춘다.
+	len = xlen + initargs_offs : saved_command_line에서 init args 구분 지점의 실제 인덱스 계산.
+	(앞에 extra_command_line이 붙었으면 xlen만큼 밀려있기 때문)
+	strcpy(saved_command_line + len, extra_init_args) : saved_command_line의 그 위치부터 extra_init_args를 복사.
+	실행 직후 saved_command_line의 해당 위치에는 extra_init_args 문자열이 들어간다.
+	len += ilen - 4;  // strlen(extra_init_args) : ilen은 (strlen(extra_init_args) + 4)였으므로,
+	ilen - 4는 extra_init_args의 실제 길이. len을 extra_init_args 끝 위치로 이동시키는 계산.
+	strcpy(saved_command_line + len, boot_command_line + initargs_offs - 1) : boot_command_line에서 기존 cmdline init-param 부분을
+	saved_command_line의 extra_init_args 뒤에 이어 붙이고 여기서 + initargs_offs - 1 을 쓰는 건
+	원래 " -- " 구분자 포함/경계 처리를 맞추기 위한 오프셋 조정(구현 의도).
+	결과적으로 saved_command_line은 " -- "[extra_init_args][원래 cmdline init args]	순서를 갖게 된다.
+	else
+	(initargs_offs == 0) : boot_command_line에 init args 구분자가 없었으므로,
+	saved_command_line 뒤에 새로 " -- "와 extra_init_args를 그냥 붙인다.
+	len = strlen(saved_command_line) : 현재 saved_command_line 문자열 끝 인덱스
+	strcpy(saved_command_line + len, " -- ") : 끝에 구분자 " -- "를 붙인다.
+	len += 4 : " -- " 길이만큼 len을 이동(다음 복사 시작점으로)
+	strcpy(saved_command_line + len, extra_init_args) : 그 뒤에 extra_init_args를 붙인다.
+	*/
 	if (ilen) {
 		/*
 		 * Append supplemental init boot args to saved_command_line
@@ -732,7 +872,10 @@ static void __init setup_command_line(char *command_line)
 			strcpy(saved_command_line + len, extra_init_args);
 		}
 	}
-
+	/*
+	saved_command_line_len : 최종 saved_command_line의 문자열 길이(널문자 제외)를 저장하는 전역 변수
+	이 값은 이후 다른 코드에서 saved_command_line을 다룰 때 길이를 빠르게 알기 위해 사용될 수 있다.
+	*/
 	saved_command_line_len = strlen(saved_command_line);
 }
 
@@ -1476,9 +1619,43 @@ void start_kernel(void) //시작
 	내부 트리/테이블 구조로 변환
 	이후 커널 코드들이 bootconfig API로 접근 가능 */
 	setup_boot_config();
+	/*
+	부팅 시 전달된 커맨드라인을 원본 보존용, 파싱 과정에서 수정될 수 있는 복사본으로 분리해 메모리에 할당하고 구성하는 함수.
+	extra_command_line 및 extra_init_args를 규칙에 맞게 결합한다.
+	extra_command_line 결합 규칙
+	extra_command_line은 항상 커맨드라인 맨 앞에 붙인다.
+	이유: 커맨드라인에는 -- 구분자가 포함될 수 있는데, 이를 기준으로 커널 인자와 init 인자가 나뉜다.
+	extra_command_line이 뒤에 붙으면 이 경계가 깨질 수 있다.
+	결과 형태 :	saved_command_line   = extra_command_line + boot_command_line + ...
+	static_command_line  = extra_command_line + command_line
+	extra_init_args 결합 규칙
+	-- 는 init 프로세스에게 전달할 인자 구간의 시작을 의미한다.
+	extra_init_args는 init에 전달할 추가 인자이므로 saved_command_line에만 붙인다.
+	static_command_line은 커널 파라미터 파싱 대상 스냅샷이므로 init 인자를 합치지 않는다.
+	init 인자 순서 규칙
+	init 인자 구간이 존재할 경우 항상 다음 순서를 보장한다.
+	-- + bootconfig 또는 supplemental init 인자 + 기존 cmdline init 인자
+	이유: bootconfig 등에서 추가된 init 인자를 기존 init 인자보다 앞에 두어
+	우선 적용되도록 하기 위함이다.
+	initargs_offs 값에 따른 결합 방식
+	initargs_offs != 0 인 경우 : boot_command_line 안에 이미 init 인자 구간이 존재한다는 의미이므로,
+	그 경계 위치에 extra_init_args를 끼워 넣어 순서 규칙을 맞춘다.
+	initargs_offs == 0 인 경우 : 기존에 init 인자 구간이 없으므로, saved_command_line 끝에 -- 를 새로 추가한 뒤 extra_init_args를 덧붙인다.
+	*/
 	setup_command_line(command_line);
-	setup_nr_cpu_ids();
-	setup_per_cpu_areas();
+	/*
+	시스템에서 실제로 사용할 CPU 개수(nr_cpu_ids)를 확정하는 함수.
+	NR_CPUS는 컴파일 타임 최대값이며, 실제 하드웨어 CPU 수와 다를 수 있다.
+	cpu_possible_mask 등을 기반으로 실제 가능한 CPU 범위를 계산해 nr_cpu_ids에 저장한다.
+	이후 per-cpu 자료구조 크기, 반복 루프 범위 등은	이 값(nr_cpu_ids)을 기준으로 동작한다.
+	*/
+	setup_nr_cpu_ids(); // kernel/smp.c
+	/*
+	각 CPU마다 독립적으로 사용하는 per-CPU 메모리 영역을 할당하고 초기화하는 함수.
+	CPU별 변수(per-cpu 변수)가 서로 간섭하지 않도록 CPU마다 전용 메모리 영역을 준비.
+	이후 this_cpu_* / per_cpu() 매크로 접근은 이 함수에서 설정한 per-CPU 영역을 기준으로 동작.
+ 	*/
+	setup_per_cpu_areas(); // arch/sparc/kernel/smp_64.c
 	smp_prepare_boot_cpu();	/* arch-specific boot-cpu hooks */
 	early_numa_node_init();
 	boot_cpu_hotplug_init();

@@ -1529,7 +1529,7 @@ static int __init pcpu_cpu_to_node(int cpu)
 	return cpu_to_node(cpu);
 }
 
-void __init setup_per_cpu_areas(void)
+void __init setup_per_cpu_areas(void) // ssetup_per_cpu_areas
 {
 	unsigned long delta;
 	unsigned int cpu;
