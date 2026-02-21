@@ -6441,7 +6441,7 @@ int __init cgroup_init_early(void) // cgroup_init_early
 	__initdata : ctx는 부팅 끝나면 데이터도 버릴 수 있도록 ? 어떤 시점까지가 부팅 끝인지, 버려진 이후는?
 // TODO : __initdata 어떻게 구현? 버린다? 컴퓨터입장에서? 왜 여기서 처음? 여기서의 static 이유? static __initdata?
 	__initdata: 변수를 .init.data 섹션에 배치해 부팅(init) 후 메모리 회수 대상이 되게 함.
-	"버린다" = init 완료 시 해당 섹션의 메모리 범위를 페이지 allocator에 반환해 재사용 가능하게 만드는 것.
+	버린다 = init 완료 시 해당 섹션의 메모리 범위를 페이지 allocator에 반환해 재사용 가능하게 만드는 것.
 	static: 스택이 아니라 정적 저장영역에 두어 early boot에서 스택 부담을 줄이고 주소/수명을 안정화.
 	static + __initdata: init 동안만 필요한 정적 데이터를 init 섹션에 두고, 이후 RAM 낭비를 없애는 패턴.
 // TODO : cgroup_fs_context 없으면 부팅 왜 못하고 이후에 안쓰는지? ctx를 언제까지 쓰는지?
