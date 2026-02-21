@@ -1525,7 +1525,7 @@ void start_kernel(void) //시작
 		├─ cpu 설정/통계
 		├─ memory 설정/통계
 		└─ io 설정/통계
-// TODO : cgroup 툴 제한직접? 실사용예시
+// TODO : cgroup 툴 제한직접? 실사용예시 
 	cgroup 루트는 시스템 전체 자원의 기준점을 가지고 있으며,
 	자식 cgroup들은 그 범위 안에서 CPU·메모리·IO에 대한 제한이나 비중 규칙을 가지며,
 	실행 시 커널은 각 프로세스가 속한 cgroup과 그 부모 체인을 기준으로 자원 사용을 판단한다.
