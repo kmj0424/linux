@@ -1143,19 +1143,34 @@ void __init setup_arch(char **cmdline_p) // setup_arch
 	*/
 	const struct machine_desc *mdesc = NULL;
 	void *atags_vaddr = NULL;
+	/* __atags_pointer :	ARM 부트 프로토콜에서 r2 레지스터 값.
+	과거에는 ATAGS 리스트의 물리 주소, 현재는 대부분 DTB(Device Tree Blob)의 물리 주소
 
+	FDT_VIRT_BASE() : DTB/ATAGS가 놓인 물리 주소를 초기 부팅 단계에서 커널이 읽을 수 있도록	접근 가능한 가상 주소로 변환 */
 	if (__atags_pointer) // r2  
 		atags_vaddr = FDT_VIRT_BASE(__atags_pointer); // 부트로더가 r2로 준 DTB/ATAGS의 물리주소를 현재 초기 매핑 상태에서 커널이 실제로 읽을 수 있는 가상주소 포인터로 변환
-
+	/* setup_processor: 현재 실행 중인 CPU를 식별하고(MIDR), CPU별 vtable, 캐시/TLB 정책, HWCAP 기반을 설정.
+	머신(DT/ATAGS) 파싱 전에 CPU가 안정적으로 동작할 기반을 만든다.	*/
 	setup_processor();
+	/* Device Tree(DT) : 하드웨어 구성을 코드가 아닌 데이터로 표현한 트리 구조.
+	DTB(FDT) : DT를 컴파일한 바이너리(blob), 부트로더가 메모리에 올려두고 커널에 주소만 전달
+	setup_machine_fdt :	DTB의 compatible 정보를 이용해 현재 머신에 맞는 machine_desc를 찾는다.
+	memblock : 부팅 초기에 사용하는 물리 메모리 관리자,	allocator가 준비되기 전 메모리 등록/예약/할당을 담당한다.	
+	memblock_reserve : DTB가 놓인 물리 메모리 영역이 이후 커널 할당으로 덮어써지지 않도록 예약 */
 	if (atags_vaddr) {
 		mdesc = setup_machine_fdt(atags_vaddr);
 		if (mdesc)
 			memblock_reserve(__atags_pointer,
 					 fdt_totalsize(atags_vaddr));
 	}
+	/* ATAGS : DT 이전에 사용되던 ARM 레거시 부트 파라미터 전달 방식.
+	__machine_arch_type : ATAGS 시대의 머신 타입 ID(r1).
+	setup_machine_tags : DTB 매칭 실패 시, ATAGS와 머신 타입 ID를 이용해 machine_desc를 찾는 fallback 경로.	*/
 	if (!mdesc)
 		mdesc = setup_machine_tags(atags_vaddr, __machine_arch_type);
+	/* 머신 식별 실패 시 : DTB가 유효하지 않거나, 커널이 해당 머신 타입을 지원하지 않는 경우.
+	early_print : 일반 printk 콘솔이 준비되기 전에도 출력 가능한 초기 출력 함수.
+	dump_machine_table : 커널이 알고 있는 machine_desc 테이블을 출력해 디버깅을 돕는다.	*/
 	if (!mdesc) {
 		early_print("\nError: invalid dtb and unrecognized/unsupported machine ID\n");
 		early_print("  r1=0x%08x, r2=0x%08x\n", __machine_arch_type,
@@ -1164,28 +1179,44 @@ void __init setup_arch(char **cmdline_p) // setup_arch
 			early_print("  r2[]=%*ph\n", 16, atags_vaddr);
 		dump_machine_table();
 	}
-
+	/* machine_desc / machine_name : 전역 머신 정보 확정, 이후 아키텍처/드라이버 초기화 단계에서 기준 정보로 사용
+	dump_stack_set_arch_desc : 스택 덤프/크래시 덤프에 머신 이름을 태그로 기록 */
 	machine_desc = mdesc;
 	machine_name = mdesc->name;
 	dump_stack_set_arch_desc("%s", mdesc->name);
-
+	/* reboot_mode : 커널 재부팅 방식 정책, 머신별 기본 정책을 machine_desc에서 반영 */
 	if (mdesc->reboot_mode != REBOOT_HARD)
 		reboot_mode = mdesc->reboot_mode;
-
+	/* setup_initial_init_mm : 커널 주소 공간(init_mm)의 초기 경계를 설정
+	링커 심볼
+	_text : 커널 코드 시작
+	_etext : 커널 코드 끝
+	_edata : 데이터 영역 끝
+	_end : 커널 이미지 끝
+	*/
 	setup_initial_init_mm(_text, _etext, _edata, _end);
 
 	/* populate cmd_line too for later use, preserving boot_command_line */
+	/* 커널 커맨드라인 처리 : boot_command_line은 원본을 보존하고, cmd_line은 이후 단계에서 파싱/소비해도 되는 사본.
+	*cmdline_p에 cmd_line 버퍼 주소를 저장해 커널 공통 코드가 사용할 커맨드라인 포인터를 전달 */
 	strscpy(cmd_line, boot_command_line, COMMAND_LINE_SIZE);
 	*cmdline_p = cmd_line;
-
+	/* early_fixmap_init : 초기 부팅 단계에서 임시 물리 메모리 접근을 위한 fixmap 준비.
+	early_ioremap_init : 정식 ioremap 이전에 장치 레지스터 접근을 가능하게 하는 초기 ioremap 인프라 준비 */
 	early_fixmap_init();
 	early_ioremap_init();
-
+	/* parse_early_param : 커맨드라인 중 반드시 초기에 적용해야 하는 옵션을 먼저 처리
+	(earlycon, debug, 일부 메모리 옵션 등) */
 	parse_early_param();
 
 #ifdef CONFIG_MMU
+	/* early_mm_init : MMU 사용 커널에서 정식 paging_init 전에 필요한 초기 메모리/매핑 준비를 수행
+	머신별 특성을 반영하기 위해 mdesc를 인자로 받는다. */
 	early_mm_init(mdesc);
 #endif
+	/* setup_dma_zone : DMA 가능한 물리 주소 범위 및 zone 정책 설정.
+	xen_early_init : Xen 게스트 환경일 경우 필요한 초기 전제 조건 설정.
+	arm_efi_init : EFI 부팅 경로 사용 시 초기 EFI 환경 처리. */
 	setup_dma_zone(mdesc);
 	xen_early_init();
 	arm_efi_init();
@@ -1193,50 +1224,73 @@ void __init setup_arch(char **cmdline_p) // setup_arch
 	 * Make sure the calculation for lowmem/highmem is set appropriately
 	 * before reserving/allocating any memory
 	 */
-	adjust_lowmem_bounds();
-	arm_memblock_init(mdesc);
+	adjust_lowmem_bounds(); //lowmem/highmem 경계 계산 : 물리 메모리 예약/할당(memblock) 전에 32-bit 환경의 lowmem/highmem 경계를 올바르게 설정
+	arm_memblock_init(mdesc); // arm_memblock_init : DT/머신 정보를 기반으로 물리 메모리 뱅크 등록, reserved-memory 반영, 커널 예약 영역 설정 등을 수행
 	/* Memory may have been removed so recalculate the bounds. */
-	adjust_lowmem_bounds();
+	adjust_lowmem_bounds(); // 메모리 구성 변경 가능성을 반영해 lowmem/highmem 경계를 다시 계산
 
-	early_ioremap_reset();
+	early_ioremap_reset(); // 초기 ioremap에서 사용한 임시 매핑을 정리하고 이후 정식 매핑 단계로 전환
 
-	paging_init(mdesc);
-	kasan_init();
-	request_standard_resources(mdesc);
+	paging_init(mdesc); // 커널 페이지 테이블과 가상 메모리 구조를 본격적으로 구성
+	kasan_init(); // KASAN 사용 시 메모리 오류 탐지용 shadow 메모리 초기화
+	request_standard_resources(mdesc); // 시스템 RAM, 커널 코드 영역 등 표준 리소스를 등록
 
-	if (mdesc->restart) {
+	if (mdesc->restart) { // restart 콜백 등록 : mdesc->restart가 제공되면 보드별 리셋 구현을 커널 재시작 경로에 연결
 		__arm_pm_restart = mdesc->restart;
 		register_restart_handler(&arm_restart_nb);
 	}
 
-	unflatten_device_tree();
+	unflatten_device_tree(); // unflatten_device_tree : DTB(FDT blob)를 커널 내부 트리 구조로 변환해 이후 드라이버/서브시스템이 DT를 탐색할 수 있게 한다.
 
-	arm_dt_init_cpu_maps();
+	arm_dt_init_cpu_maps(); // DT의 cpus 노드를 기반으로 CPU logical/physical 매핑 구성
+	/* PSCI : ARM 표준 펌웨어 인터페이스(CPU on/off, system reset 등).
+	psci_dt_init : DT에서 PSCI 정보를 파싱하고 PSCI 사용을 준비	*/
 	psci_dt_init();
 #ifdef CONFIG_SMP
-	if (is_smp()) {
+	if (is_smp()) { // 현재 커널이 실제로 SMP로 동작해야 하는 상황인지
+		/* mdesc->smp_init : 머신(보드)별 SMP 초기화 훅.
+		secondary CPU를 깨우기 전에	보드/SoC 특유의 준비 작업을 수행
+		존재하지 않을 수도 있으며(NULL 가능), 호출 결과로 성공/실패를 반환할 수 있다.
+		mdesc->smp_init이 없거나(NULL), 호출했지만 실패(0 반환)한 경우
+		→ 커널 공통 SMP bring-up 경로를 선택 */
 		if (!mdesc->smp_init || !mdesc->smp_init()) {
+			/* psci_smp_available() : PSCI(Power State Coordination Interface)를 통해 secondary CPU를 제어할 수 있는지 확인하는 함수.
+			PSCI : ARM 표준 펌웨어 인터페이스로, CPU on/off, system reset/off 등을 펌웨어에 위임하는 방식.
+			true : 펌웨어가 CPU bring-up을 담당할 수 있음 */
 			if (psci_smp_available())
-				smp_set_ops(&psci_smp_ops);
+				smp_set_ops(&psci_smp_ops); // secondary CPU를 깨우는 방식(SMP ops)을 PSCI 기반 구현으로 설정
+			/* mdesc->smp : 머신(보드)별 SMP ops 테이블.
+			PSCI를 사용할 수 없는 경우,	보드가 제공하는 자체 SMP 구현을 사용
+			*/
 			else if (mdesc->smp)
 				smp_set_ops(mdesc->smp);
 		}
+		/* smp_init_cpus() : 시스템에 존재하는 CPU들을 커널 내부 자료구조에 등록
+		possible/present CPU 마스크 구성
+		논리 CPU 번호 할당 준비
+		아직 secondary CPU를 실제로 실행시키는 단계는 아님
+		*/
 		smp_init_cpus();
-		smp_build_mpidr_hash();
+		smp_build_mpidr_hash(); // MPIDR 값을 기반으로 물리 CPU ID → 논리 CPU 번호 변환을 빠르게 하기 위한 해시/매핑 테이블을 구성
 	}
 #endif
 
-	if (!is_smp())
-		hyp_mode_check();
+	if (!is_smp()) // 커널이 SMP로 동작하지 않는 경우(단일 CPU 경로)
+		hyp_mode_check(); // ARM 가상화 확장(HYP mode) 관련 상태 점검 함수
 
-	reserve_crashkernel();
-
+	reserve_crashkernel(); //  crashkernel= 커맨드라인 옵션이 지정된 경우, kdump용 크래시 커널이 사용할 메모리 영역을 미리 물리 메모리에서 예약
+/* CONFIG_VT : 가상 터미널(Virtual Terminal) 지원 여부.
+CONFIG_VGA_CONSOLE : VGA 기반 콘솔 드라이버 사용 여부.
+vgacon_register_screen : VGA 콘솔 사용 시, 초기 화면 해상도/버퍼 정보(vgacon_screen_info)를 콘솔 서브시스템에 등록
+VT + VGA 콘솔이 모두 활성화된 경우에만 VGA 화면 초기화 코드가 실행
+*/
 #ifdef CONFIG_VT
 #if defined(CONFIG_VGA_CONSOLE)
 	vgacon_register_screen(&vgacon_screen_info);
 #endif
 #endif
-
+/* mdesc->init_early : 머신(보드)별로 제공되는 아주 이른 초기화 훅
+보드마다 필요할 수도, 없을 수도 있는(optional) 훅이므로 NULL 여부를 확인한 뒤 호출 */
 	if (mdesc->init_early)
 		mdesc->init_early();
 }

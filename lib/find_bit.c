@@ -224,19 +224,57 @@ unsigned long _find_next_zero_bit(const unsigned long *addr, unsigned long nbits
 EXPORT_SYMBOL(_find_next_zero_bit);
 #endif
 
-#ifndef find_last_bit
+#ifndef find_last_bit // find_last_bit
 unsigned long _find_last_bit(const unsigned long *addr, unsigned long size)
+/*
+비트맵은 unsigned long 배열로 표현, addr는 unsigned long 단위로 저장된 비트 묶음의 시작 주소
+addr가 가리키는 비트맵에서 0..size-1 범위 안의 마지막 인덱스 1비트를 찾는다.
+찾으면 그 비트의 인덱스를 반환하고, 없으면 size를 반환한다.
+#ifndef find_last_bit
+어떤 아키텍처는 find_last_bit를 자체 최적화(asm 등)로 제공.
+그 경우 find_last_bit가 이미 정의되어 있을 수 있으므로, 중복 정의를 피하기 위해 빌드에서 제외.
+이 코드는 최적화 버전이 없을 때 쓰는 fallback 구현.
+addr : unsigned long 배열로 표현된 비트맵의 시작 주소.
+예: cpumask_bits(...) 같은 매크로가 넘겨주는 raw 비트 배열 포인터.
+size : 검사할 비트의 개수(상한). 유효한 비트 인덱스 범위는 0..size-1.
+워드 : unsigned long 하나, 워드 크기는 아키텍처에 따라 다름.
+크기는 BITS_PER_LONG 매크로로 표현
+BITS_PER_LONG : unsigned long 이 몇 비트인지 나타내는 값(예 : 64비트면 64)
+반환값
+마지막 1비트를 찾으면 그 비트의 인덱스(0 기반)를 반환.
+1비트가 하나도 없으면 size를 반환.
+*/
 {
-	if (size) {
+	if (size) { // size가 존재하면 마지막 워드부터 거꾸로 검사.
+		/*
+		val : 마지막 워드에서 size에 해당하는 유효 비트만 남기기 위한 마스크
+		비트맵은 unsigned long 단위로 저장되는데, size가 BITS_PER_LONG의 배수가 아니면 마지막 워드에는 남는 비트(범위 밖)가 존재.
+		그 범위 밖 비트가 우연히 1이면 오탐이 되므로, 마지막 워드에서는 유효 비트만 보도록 마스킹.
+		BITS_PER_LONG = 64, size = 130이면 마지막 워드는 3번째 워드(idx=2)이고
+		마지막 워드에서는 0..1(2개 비트)만 유효하므로 그 부분만 1로 남기는 마스크가 생성된다.
+		*/
 		unsigned long val = BITMAP_LAST_WORD_MASK(size);
+		/*
+		idx : size-1 이 속한 워드의 인덱스, 비트맵의 마지막 워드 번호
+		BITS_PERLONG = 64, size = 1 => idx = (0) / 64 = 0
+		size = 64 => idx = (63) / 64 = 0
+		size = 65 => idx = (64) / 64 = 1
+		*/
 		unsigned long idx = (size-1) / BITS_PER_LONG;
 
-		do {
-			val &= addr[idx];
+		do { // idx 워드부터 시작해서 0 워드까지 역순으로 내려가며 검사, 각 워드에서 1비트가 발견되면 즉시 반환
+			val &= addr[idx]; // 현재 검사 중인 허용 마스크 & 현재 워드의 실제 비트 값
+			/*
+			현재 워드에 1비트가 하나라도 남아있으면(0이 아니면) 마지막 1비트를 찾은 것.
+			__fls(val) : val에서 가장 높은 위치의 1비트 인덱스(0 기반, 워드 내부 기준)를 반환.
+			예 : val = 0b00101000이면 __fls(val)=5 같은 식(최상위 1비트 위치).
+			(현재 워드의 시작 비트 인덱스) + (워드 내부 최상위 1비트 위치) = idx * BITS_PER_LONG + __fls(val)
+			전체 비트맵 기준의 비트 인덱스
+			*/
 			if (val)
 				return idx * BITS_PER_LONG + __fls(val);
 
-			val = ~0ul;
+			val = ~0ul; // ~ : NOT 연산자 -> 모두 1인 unsigned long
 		} while (idx--);
 	}
 	return size;

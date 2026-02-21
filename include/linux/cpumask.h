@@ -30,11 +30,38 @@
 extern unsigned int nr_cpu_ids;
 #endif
 
-static __always_inline void set_nr_cpu_ids(unsigned int nr)
+static __always_inline void set_nr_cpu_ids(unsigned int nr) // set_nr_cpu_ids
+/*
+nr : setup_nr_cpu_ids() 등에서 계산된 사용할 CPU 개수 상한 값
+보통 (cpu_possible_mask에서 마지막 1비트 인덱스 + 1)이 들어온다.
+nr_cpu_ids : 커널이 실제로 루프/배열 크기 계산 등에 사용하는 런타임 CPU 개수 전역 변수.
+__always_inline : 컴파일러에게 이 함수를 반드시 인라인 처리하라고 지시.
+(함수 호출 오버헤드를 없애기 위한 목적)
+static : 이 정의는 해당 번역 단위 내부에서만 사용됨.
+전처리 조건
+NR_CPUS : 커널을 빌드할 때 정해진 최대 CPU 개수 상수.
+NR_CPUS == 1 인 경우 : 단일 CPU 전용 커널(UP 커널).
+이 경우 런타임에 CPU 개수를 바꾸는 의미가 없다.
+CONFIG_FORCE_NR_CPUS : 빌드 시 nr_cpu_ids를 강제로 고정시키는 설정.
+런타임 계산 결과와 상관없이 NR_CPUS 값을 유지하게 한다.
+nr_cpu_ids를 런타임에 바꾸면 안 되는 환경인지 검사하는 것.
+*/
 {
+/*
+nr : 새로 설정하려는 CPU 개수 값
+nr_cpu_ids : 이미 설정되어 있는 CPU 개수 값
+WARN_ON(condition) : condition이 참이면 경고 메시지를 출력하고 디버깅용 스택 트레이스를 남긴다.
+nr_cpu_ids를 바꿀 수 없는 환경인데 새 값(nr)이 기존 nr_cpu_ids와 다르면 경고를 발생시킨다.
+실제로 nr_cpu_ids 값을 바꾸지는 않는다.
+CPU 개수 변경 시도가 잘못되었음을 경고만 한다.
+*/
 #if (NR_CPUS == 1) || defined(CONFIG_FORCE_NR_CPUS)
 	WARN_ON(nr != nr_cpu_ids);
-#else
+#else // CONFIG_FORCE_NR_CPUS가 정의되지 않아서 SMP 환경에서 런타임 CPU 개수를 정상적으로 설정할 수 있는 경우
+/*
+nr_cpu_ids 전역 변수에 nr 값을 대입한다.
+커널이 실제로 사용할 CPU 개수 상한을 런타임 계산 결과(nr)로 확정한다.
+*/
 	nr_cpu_ids = nr;
 #endif
 }

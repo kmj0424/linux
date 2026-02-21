@@ -6435,10 +6435,21 @@ static void __init cgroup_init_subsys(struct cgroup_subsys *ss, bool early) // c
  */
 int __init cgroup_init_early(void) // cgroup_init_early
 {
-	/*
+	/* 만들 수 있는가?
 	ctx(cgroup_fs_context) : cgroup 계층(root/hierarchy)을 초기화할 때 필요한 작업 컨텍스트 구조체
 	ctx.root만 채워서 init_cgroup_root()에 전달하는 용도로 사용
-	__initdata : ctx는 부팅 끝나면 데이터도 버릴 수 있도록
+	__initdata : ctx는 부팅 끝나면 데이터도 버릴 수 있도록 ? 어떤 시점까지가 부팅 끝인지, 버려진 이후는?
+// TODO : __initdata 어떻게 구현? 버린다? 컴퓨터입장에서? 왜 여기서 처음? 여기서의 static 이유? static __initdata?
+	__initdata: 변수를 .init.data 섹션에 배치해 부팅(init) 후 메모리 회수 대상이 되게 함.
+	"버린다" = init 완료 시 해당 섹션의 메모리 범위를 페이지 allocator에 반환해 재사용 가능하게 만드는 것.
+	static: 스택이 아니라 정적 저장영역에 두어 early boot에서 스택 부담을 줄이고 주소/수명을 안정화.
+	static + __initdata: init 동안만 필요한 정적 데이터를 init 섹션에 두고, 이후 RAM 낭비를 없애는 패턴.
+// TODO : cgroup_fs_context 없으면 부팅 왜 못하고 이후에 안쓰는지? ctx를 언제까지 쓰는지?
+	cgroup_fs_context(ctx)는 cgroup root를 초기화/마운트할 때 필요한 입력 옵션 묶음 컨테이너.
+	early init과 mount 경로가 같은 초기화 로직(init_cgroup_root)을 공유하려고 ctx 형태로 전달한다.
+	root 초기화가 끝나면 필요한 값(flags/name/release_agent 등)은 cgroup_root 내부로 복사되므로 ctx는 이후에 쓰지 않는다.
+	ctx의 실제 사용 범위는 init_cgroup_root(&ctx) 호출 전후이며, __initdata라 init 완료 후 메모리 회수 대상이 된다.
+
 	*/
 	static struct cgroup_fs_context __initdata ctx;
 	/*

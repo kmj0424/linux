@@ -313,7 +313,7 @@ static int parse_build_id(struct freader *r, unsigned char *build_id, __u32 *siz
 		note에 헤더는 12바이트 고정 사이즈
 		왜 >= 가 아닌가
 		desc에 들은 값을 어차피 봐야해서 볼려면 16보다 커야하니까 build-id 찾기 위해
-		
+
 		현재 오프셋에서 최소한 헤더(12) + name 크기(4)를 읽을 수 있을 때만 루프 진입.	
 		name/desc의 실제 길이는 4배수일 필요는 없고, 다음 필드로 이동할 때 4바이트 정렬을 맞추기 위해 padding을 포함한 이동량을 ALIGN()로 계산한다.
 		*/
