@@ -1689,7 +1689,9 @@ void start_kernel(void) //시작
 	CPU별 __per_cpu_offset(cpu)을 채워 per_cpu()/this_cpu_* 주소 계산이 가능해지게 한다.
  	*/
 	setup_per_cpu_areas(); // arch/sparc/kernel/smp_64.c
-	smp_prepare_boot_cpu();	/* arch-specific boot-cpu hooks */
+	/* 부트 CPU에 대한 SMP 초기 준비를 수행한다.
+	현재 실행 중인 CPU를 boot CPU로 설정하고, per-CPU 데이터 접근을 위한 기본 상태를 아키텍처별로 초기화한다. */
+	smp_prepare_boot_cpu();	/* arch-specific boot-cpu hooks arch/arm/kernel/smp.c */
 	early_numa_node_init();
 	boot_cpu_hotplug_init();
 

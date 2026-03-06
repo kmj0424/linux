@@ -12,7 +12,7 @@
 #include <linux/init.h>
 #include <linux/threads.h>
 
-#define raw_smp_processor_id() (current_thread_info()->cpu)
+#define raw_smp_processor_id() (current_thread_info()->cpu) // smp_processor_id(), arch/arc/include/asm/thread_info.h
 
 /* including cpumask.h leads to cyclic deps hence this Forward declaration */
 struct cpumask;
