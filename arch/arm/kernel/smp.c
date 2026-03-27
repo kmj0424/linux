@@ -495,8 +495,21 @@ void __init smp_cpus_done(unsigned int max_cpus)
 	hyp_mode_check();
 }
 
-void __init smp_prepare_boot_cpu(void)
+void __init smp_prepare_boot_cpu(void) // smp_prepare_boot_cpu
+/* set_my_cpu_offset - arch/include/asm/percpu.h
+smp_processor_id - arch/arc/include/asm/smp.h
+*/
 {
+	/*
+	현재 실행 중인 CPU의 per-CPU 메모리 offset 값을 계산해서, 그 값을 현재 CPU의 per-CPU base offset으로 설정
+	현재 cpu가 사용할 per-CPU 영역의 기준 주소 오프셋을 설정하는 코드
+	smp_processor_id()에서 CPU의 번호를 가져오고,
+	CPU 번호를 이용해서 per_cpu_offset(cpu)에서 그 CPU의 per-CPU 메모리 offset을 가져온다.
+	각 cpu는 자신의 데이터 영역이 따로 있고, per_cpu_offset(cpu)는 해당 cpu의 per-CPU 영역 시작 offset을 반환.
+	set_my_cpu_offset(offset)은 현재 CPU가 per-CPU 변수를 접근할 때 사용할 offset 설정
+	같은 per-CPU 접근 매크로들이 사용할 base offset을 설정하는 함수
+	이후에 per-cpu 변수 접근이 발생하기 때문에 boot CPU가 자신의 per-CPU base offset을 먼저 세팅
+	*/
 	set_my_cpu_offset(per_cpu_offset(smp_processor_id()));
 }
 

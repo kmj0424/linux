@@ -1445,7 +1445,7 @@ void start_kernel(void) //시작
 	builld_id_parse_buf()러 notes를 파싱 후
 	찾은 Build ID를 전역 배열 vmlinux_builld_id에 저장
 	init 이후에는 __ro_after_init로 보호(읽기 전용)
-// TODO : note 만든 이유
+	note 만든 이유
 	실행에는 직접 필요 없지만, 바이너리의 정체·메타정보를 안전하게 담기 위해 만든 설명용 메타데이터 영역
 	NOTE가 없다면 런타임 수정, 의미 섞임, 포맷 표준화 x, 디버거/툴이 뭔지 알 방법 없음, strip하면 사라짐, 바이너리 식별 불가능
 	빌드/플랫폼/ABI/식별 정보 저장, 실행 로직과 완전히 분리, 바이너리에 관한 설명서 용으로 설계
@@ -1525,13 +1525,43 @@ void start_kernel(void) //시작
 		├─ cpu 설정/통계
 		├─ memory 설정/통계
 		└─ io 설정/통계
+	cgroup 툴 제한직접? 함수가 하는것?
 
+	목적 : 부팅 초기에 cgroup 자료구조를 항상 존재하는 상태로 성립시키는 함수.
+
+	이 함수가 하는 것
+	- default cgroup 루트 계층(root cgroup 트리)을 초기화한다.
+	- 루트 css를 특수 객체로 표시한다 (일반 css처럼 refcount 해제 대상 아님).
+	- init_task를 기본 cgroup(css_set)에 직접 연결한다.
+	init_task는 부모가 없어 상속이 불가능하기 때문에 예외적으로 직접 연결.
+	이 연결로 인해 이후 생성되는 모든 태스크는 정상적으로 cgroup을 상속받을 수 있다.
+	- 모든 cgroup 컨트롤러를 순회하며 정상성 검사(css_alloc/css_free 존재 여부 등), id(내부 인덱스) 확정,
+	name(사용자 인터페이스용 이름) 확정, early_init이 설정된 컨트롤러만 최소 초기화 수행
+
+	이 함수가 하지 않는 것
+	CPU/메모리/IO 자원 제한 설정, 프로세스 분류하거나 이동, 정책 적용.
+
+	설계 의도 : 커널 내부 코드가 모든 태스크는 항상 유효한 cgroup을 가진다는 전제를 안전하게 사용할 수 있도록 최소 기반을 마련하는 것.
+
+	자원 제어는 이후 스케줄러(CPU), 메모리 할당 경로, IO 경로에서 각 컨트롤러가 개입하면서 수행된다.
+	이 함수는 정책 적용 단계가 아니라 구조적 기반을 성립시키는 초기화 단계이다.
 	cgroup 루트는 시스템 전체 자원의 기준점을 가지고 있으며,
 	자식 cgroup들은 그 범위 안에서 CPU·메모리·IO에 대한 제한이나 비중 규칙을 가지며,
 	실행 시 커널은 각 프로세스가 속한 cgroup과 그 부모 체인을 기준으로 자원 사용을 판단한다.
 
 	cgroup에서 부모는 자원의 상한을 정하고, 자식은 그 범위 안에서 비중·제한 규칙을 가지며,
 	실행 시 컨트롤러는 자식부터 부모·루트까지의 설정을 함께 고려해 경쟁 상황에서 자원 사용을 결정한다.
+
+	이 함수에는 자원 정책을 설정하는 로직은 존재하지 않는다.
+	CPU/메모리/IO 제한 값을 여기서 결정하거나 저장하지 않는다.
+	프로세스를 특정 cgroup으로 이동시키지 않는다.
+	정책 계산이나 자원 분배를 수행하지 않는다.
+
+	자원 정책은 cgroup 파일시스템(mount) 이후, 사용자 공간(systemd, docker 등)이 cpu.max, memory.max 같은 파일에 값을 기록한다.
+	해당 값은 각 컨트롤러(cpu, memory 등)의 내부 구조체에 저장된다.
+	이후 스케줄러(CPU), 메모리 할당 경로, IO 경로에서 컨트롤러가 이 값을 참조하여 실제 자원 제어를 수행한다.
+
+	정책을 설정하는 단계가 아니라 정책이 나중에 저장되고 적용될 수 있도록 cgroup 구조를 부팅 초기에 준비하는 초기화 단계이다.
 
 	프로세스가 자원을 쓰려고 하면:
 	1. 자기 cgroup(자식) 의 규칙을 본다
@@ -1654,9 +1684,14 @@ void start_kernel(void) //시작
 	각 CPU마다 독립적으로 사용하는 per-CPU 메모리 영역을 할당하고 초기화하는 함수.
 	CPU별 변수(per-cpu 변수)가 서로 간섭하지 않도록 CPU마다 전용 메모리 영역을 준비.
 	이후 this_cpu_* / per_cpu() 매크로 접근은 이 함수에서 설정한 per-CPU 영역을 기준으로 동작.
+
+	부팅 초기에 percpu 메모리(first chunk)를 실제로 확보/초기화한다.
+	CPU별 __per_cpu_offset(cpu)을 채워 per_cpu()/this_cpu_* 주소 계산이 가능해지게 한다.
  	*/
 	setup_per_cpu_areas(); // arch/sparc/kernel/smp_64.c
-	smp_prepare_boot_cpu();	/* arch-specific boot-cpu hooks */
+	/* 부트 CPU에 대한 SMP 초기 준비를 수행한다.
+	현재 실행 중인 CPU를 boot CPU로 설정하고, per-CPU 데이터 접근을 위한 기본 상태를 아키텍처별로 초기화한다. */
+	smp_prepare_boot_cpu();	/* arch-specific boot-cpu hooks arch/arm/kernel/smp.c */
 	early_numa_node_init();
 	boot_cpu_hotplug_init();
 

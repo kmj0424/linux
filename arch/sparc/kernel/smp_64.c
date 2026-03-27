@@ -1529,36 +1529,107 @@ static int __init pcpu_cpu_to_node(int cpu)
 	return cpu_to_node(cpu);
 }
 
-void __init setup_per_cpu_areas(void) // ssetup_per_cpu_areas
+void __init setup_per_cpu_areas(void) // setup_per_cpu_areas
 {
+	/*
+	delta : 링크 타임 percpu 템플릿 시작주소”와 실제 percpu base 주소의 차이
+	cpu : 루프용
+	rc : allocator 시도 결과(성공이면 보통 0 이상, 실패면 음수)
+	*/
 	unsigned long delta;
 	unsigned int cpu;
 	int rc = -EINVAL;
-
+	/*
+	pcpu_chosen_fc : percpu first chunk를 어떤 방식으로 만들지 선택된 정책/방식 값.
+	PCPU_FC_PAGE : 가장 보수적이며 페이지 단위로 구성하는 방식(폴백으로 자주 사용).
+	*/
 	if (pcpu_chosen_fc != PCPU_FC_PAGE) {
+		/*
+		pcpu_embed_first_chunk() : 첫 번째 percpu chunk를 embed 방식으로 구성한다.
+		CPU topology/NUMA 거리 정보를 활용해 CPU별 percpu unit을 더 좋은 배치로 잡으려는 시도.
+		PERCPU_MODULE_RESERVE : 모듈이 로드될 때 모듈용 percpu 데이터가 붙을 수 있으므로 미리 공간을 예약한다.
+		PERCPU_DYNAMIC_RESERVE : 런타임 동적 percpu 할당(__alloc_percpu 등)을 위한 여유 공간을 예약한다.
+		4 << 20 : 구현에서 chunk 관련 크기 힌트/제약으로 쓰인다(여기서는 4MB).
+		정확한 의미는 allocator 구현에 따라 최소 chunk 크기, 원하는 chunk 크기 등으로 다를 수 있다.
+		pcpu_cpu_distance : CPU 간 거리(가까움/멀어짐) 정보를 제공하는 콜백.
+		embed allocator가 가까운 CPU들의 percpu를 가까이 놓도록 돕는다.
+		pcpu_cpu_to_node : CPU -> NUMA 노드 매핑 콜백.
+		노드 단위 locality(메모리 접근 성능)를 고려해 배치하는 데 사용된다.
+		*/
 		rc = pcpu_embed_first_chunk(PERCPU_MODULE_RESERVE,
 					    PERCPU_DYNAMIC_RESERVE, 4 << 20,
 					    pcpu_cpu_distance,
 					    pcpu_cpu_to_node);
+		/*
+		rc가 0이 아니면 실패로 보고 경고 로그를 남긴다.
+		여기서 실패해도 바로 죽지 않고 page 방식으로 폴백한다.
+		pcpu_fc_names[...]는 선택된 allocator 이름이다(로그 출력용).
+		*/
 		if (rc)
 			pr_warn("PERCPU: %s allocator failed (%d), "
 				"falling back to page size\n",
 				pcpu_fc_names[pcpu_chosen_fc], rc);
 	}
+	/*
+	위 embed 시도가 실패했거나(일반적으로 rc < 0),
+	아예 처음부터 page allocator가 선택된 경우(rc가 여전히 음수로 남아있을 수 있음),
+	page 방식 first chunk allocator로 재시도한다.
+	*/
 	if (rc < 0)
+		/*
+		pcpu_page_first_chunk : 페이지 단위로 첫 percpu chunk를 구성하는 보수적 allocator.
+		embed보다 단순하고 성공 가능성이 높아 폴백 경로로 사용된다.
+		PERCPU_MODULE_RESERVE : 모듈 percpu 공간 예약.
+		pcpu_cpu_to_node : CPU가 속한 노드 정보를 참고하여, 가능한 경우 로컬 노드에 배치한다.
+		*/
 		rc = pcpu_page_first_chunk(PERCPU_MODULE_RESERVE,
 					   pcpu_cpu_to_node);
+	/*
+	둘 다 실패하면 percpu 기반이 없는 상태라 커널이 정상 동작 불가. 부팅을 중단.
+	*/
 	if (rc < 0)
 		panic("cannot initialize percpu area (err=%d)", rc);
-
+	/*
+	pcpu_base_addr : allocator가 잡은 실제 percpu 영역의 base 주소
+	__per_cpu_start : 커널 이미지 내 percpu 템플릿 시작 심볼 주소
+	delta : 템플릿 기준 주소를 실제 percpu base로 옮기기 위한 기본 이동량.
+	이후 CPU별 unit 오프셋(pcpu_unit_offsets[cpu])를 더해서 각 CPU의 최종 __per_cpu_offset을 만든다.
+	*/
 	delta = (unsigned long)pcpu_base_addr - (unsigned long)__per_cpu_start;
+	/*
+	현재 online이 아니라 possible 전체 CPU에 대해 offset을 미리 설정한다.
+	나중에 CPU hotplug/online이 되더라도 주소 계산 테이블이 이미 준비돼 있어야 한다.
+	*/
 	for_each_possible_cpu(cpu)
+		/*
+		__per_cpu_offset(cpu) : CPU별 percpu 오프셋 테이블 항목에 접근하는 매크로/헬퍼.
+		per_cpu()/this_cpu_*가 실제 주소를 만들 때 핵심으로 사용하는 값.
+		pcpu_unit_offsets[cpu] : percpu base에서 해당 CPU의 unit(그 CPU 몫 percpu 블록)이 시작하는 위치.
+		topology/NUMA 고려 배치 때문에 CPU마다 서로 다를 수 있다.
+		__per_cpu_offset(cpu) : 템플릿 기준 주소 + __per_cpu_offset(cpu) => 해당 CPU의 실제 percpu 주소.
+		*/
 		__per_cpu_offset(cpu) = delta + pcpu_unit_offsets[cpu];
 
 	/* Setup %g5 for the boot cpu.  */
+	/*
+	부트 CPU의 로컬 percpu 오프셋 캐시를 세팅.
+	__local_per_cpu_offset : 현재 CPU에서 this_cpu_* 같은 빠른 percpu 접근에 쓰는 로컬 캐시 값.
+	아키텍처에 따라 레지스터에 대응될 수 있어 주석에 g5 같은 레지스터가 언급되기도 한다.
+	smp_processor_id() : 현재 실행 중인 CPU의 논리 번호를 얻는다(부트 초기에 부트 CPU).
+	*/
 	__local_per_cpu_offset = __per_cpu_offset(smp_processor_id());
-
+	/*
+	of_fill_in_cpu_data() : Device Tree(OF) 기반으로 CPU 관련 데이터(토폴로지/특성 등)를 채운다.
+	percpu 영역이 준비된 뒤에 CPU별 데이터를 채우는 흐름이 자연스럽다(플랫폼/구현 의존).
+	*/
 	of_fill_in_cpu_data();
+	/*
+	하이퍼바이저 환경이면 추가로 머신 디스크립션(mdesc) 기반 CPU 데이터를 채운다.
+	tlb_type : TLB/CPU 환경 타입을 나타내는 전역 상태(플랫폼 의존).
+	hypervisor : 하이퍼바이저 실행 환경을 의미.
+	mdesc_fill_in_cpu_data(cpu_all_mask) : cpu_all_mask(모든 CPU) 대상으로 CPU 데이터를 더 채운다.
+	어떤 항목을 채우는지는 플랫폼/arch 구현에 따라 달라진다.
+	*/
 	if (tlb_type == hypervisor)
 		mdesc_fill_in_cpu_data(cpu_all_mask);
 }
